@@ -91,7 +91,16 @@ def build_trajectories(df: pd.DataFrame, frame: LocalFrame, *, qnh: float, geoid
     return out
 
 
-def emission(traj: Trajectory, obs: np.ndarray, t_obs: np.ndarray, c: float, iters: int = 4):
+def _c_eff(c: float, rv: np.ndarray, R: np.ndarray, wind):
+    """Effective sound speed along the ray in a uniform wind: c + w . n, n = unit vector source -> observer
+    (rv = source - observer, so n = -rv / R)."""
+    if wind is None:
+        return c
+    w = np.asarray(wind, float)
+    return c - (rv @ w) / np.maximum(R, 1e-6)
+
+
+def emission(traj: Trajectory, obs: np.ndarray, t_obs: np.ndarray, c: float, iters: int = 4, wind=None):
     """Solve for the retarded (emission) time.
 
     obs: (M,3); t_obs: (M,K) or (K,) -> returns t_e, pos, vel, R, rvec of shape (M,K[,3]) and a validity mask.
@@ -100,14 +109,20 @@ def emission(traj: Trajectory, obs: np.ndarray, t_obs: np.ndarray, c: float, ite
     t_obs = np.broadcast_to(np.asarray(t_obs, float), (obs.shape[0],) + np.shape(t_obs)[-1:])
     o = obs[:, None, :]
     pos, _ = traj.at(t_obs)
-    te = t_obs - np.linalg.norm(pos - o, axis=-1) / c
-    # Newton on g(te) = te + R(te)/c - t_obs, g' = 1 + dR/dt/c  (quadratic convergence)
+    rv = pos - o
+    R = np.linalg.norm(rv, axis=-1)
+    te = t_obs - R / _c_eff(c, rv, R, wind)
+    # Newton on g(te) = te + R(te)/c_eff - t_obs, g' ~ 1 + dR/dt/c_eff (quadratic convergence without wind;
+    # with wind the slow variation of c_eff along the ray is neglected in g', it still converges fast)
+    if wind is not None:
+        iters = max(iters, 6)
     for _ in range(iters):
         pos, vel = traj.at(te)
         rv = pos - o
         R = np.linalg.norm(rv, axis=-1)
-        g = te + R / c - t_obs
-        gp = 1.0 + np.sum(rv * vel, axis=-1) / (np.maximum(R, 1e-6) * c)
+        ce = _c_eff(c, rv, R, wind)
+        g = te + R / ce - t_obs
+        gp = 1.0 + np.sum(rv * vel, axis=-1) / (np.maximum(R, 1e-6) * ce)
         te = te - g / gp
     pos, vel = traj.at(te)
     rvec = pos - o
@@ -116,14 +131,18 @@ def emission(traj: Trajectory, obs: np.ndarray, t_obs: np.ndarray, c: float, ite
     return te, pos, vel, R, rvec, valid
 
 
-def doppler_ratio(traj: Trajectory, obs: np.ndarray, t_obs: np.ndarray, c: float):
-    """Ratio f_obs/f0 (M,K), slant range (M,K) and validity mask."""
-    _, _, vel, R, rvec, valid = emission(traj, obs, t_obs, c)
+def doppler_ratio(traj: Trajectory, obs: np.ndarray, t_obs: np.ndarray, c: float, wind=None):
+    """Ratio f_obs/f0 (M,K), slant range (M,K) and validity mask.
+
+    With a uniform wind w (ENU, m/s): f_obs = f0 * c_eff / (c_eff + dR/dt), c_eff = c + w . n.
+    (In the air frame the observer moves at -w and the source at v - w.)"""
+    _, _, vel, R, rvec, valid = emission(traj, obs, t_obs, c, wind=wind)
     rdot = np.sum(rvec * vel, axis=-1) / np.maximum(R, 1e-6)
-    return c / (c + rdot), R, valid
+    ce = _c_eff(c, rvec, R, wind)
+    return ce / (ce + rdot), R, valid
 
 
-def cpa(traj: Trajectory, obs: np.ndarray, c: float):
+def cpa(traj: Trajectory, obs: np.ndarray, c: float, wind=None):
     """For each observer (M,3): minimum slant range and *retarded* CPA time
     (the time at which the observer hears the closest point of approach)."""
     obs = np.atleast_2d(obs)
@@ -132,11 +151,13 @@ def cpa(traj: Trajectory, obs: np.ndarray, c: float):
     chunk = max(1, 2_000_000 // max(len(traj.t), 1))
     for i in range(0, len(obs), chunk):
         o = obs[i:i + chunk, None, :]
-        r = np.linalg.norm(traj.p[None, :, :] - o, axis=-1)
+        rv_all = traj.p[None, :, :] - o
+        r = np.linalg.norm(rv_all, axis=-1)
         k = np.argmin(r, axis=1)
         rr = r[np.arange(len(k)), k]
         best_r[i:i + chunk] = rr
-        best_t[i:i + chunk] = traj.t[k] + rr / c
+        rv = rv_all[np.arange(len(k)), k]
+        best_t[i:i + chunk] = traj.t[k] + rr / _c_eff(c, rv, rr, wind)
     return best_r, best_t
 
 

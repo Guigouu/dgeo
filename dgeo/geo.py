@@ -142,3 +142,10 @@ def aircraft_hae(alt_geom_ft, alt_baro_ft, qnh_hpa: float, geoid_n: float, sourc
 
 def speed_of_sound(temp_c: float) -> float:
     return 331.3 * np.sqrt(1 + temp_c / 273.15)
+
+
+def wind_vector(speed_ms: float, from_deg: float) -> np.ndarray:
+    """ENU wind vector (m/s) from a meteorological report: speed and direction the wind blows FROM
+    (METAR convention: 270 = from the west, i.e. blowing towards the east)."""
+    a = np.radians(from_deg)
+    return np.array([-speed_ms * np.sin(a), -speed_ms * np.cos(a), 0.0])

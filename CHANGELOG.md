@@ -7,6 +7,8 @@
   "Use loudness events" in the Search tab). Off by default.
 - Candidate area (cost ≤ min + 0.1 / 0.3) reported by the CLI and the UI, to make plateaus visible.
 - Synthetic scenario with broadband jets (`dgeo synth --broadband-jets`, UI option).
+- Uniform wind in the forward model (retarded time and Doppler ratio): `--wind-speed` / `--wind-from`,
+  sidebar wind inputs, synthetic scenarios with wind.
 
 ## 0.1.0 — initial public release
 
