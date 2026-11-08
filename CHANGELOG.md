@@ -9,6 +9,12 @@
 - Synthetic scenario with broadband jets (`dgeo synth --broadband-jets`, UI option).
 - Uniform wind in the forward model (retarded time and Doppler ratio): `--wind-speed` / `--wind-from`,
   sidebar wind inputs, synthetic scenarios with wind.
+- Unknown start time: `--time-window S` (UI: "Unknown start time") scans the clock offset over ±S s, then
+  refines each zone around its own offset; the report gives the estimated start time.
+- Historical ADS-B without extraction: `dgeo adsb-hist --tar parts…` (or `--tar -` from a download pipe)
+  streams a globe_history archive; callsign and category sent before the window are kept.
+- Multi-process scoring (`dgeo search --workers N`) and `dgeo merge` for searches split into tiles.
+- `python -m dgeo` is safe to use with worker processes.
 
 ## 0.1.0 — initial public release
 

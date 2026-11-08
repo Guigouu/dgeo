@@ -461,20 +461,29 @@ with tabs[4]:
                                   "with dense traffic. See docs/METHOD.md.")
         ev_w = e2.number_input("Event weight", value=0.25, min_value=0.0, max_value=2.0, step=0.05,
                                disabled=not use_ev)
+        u1, u2 = st.columns([2, 1])
+        unk = u1.checkbox("Unknown start time", value=False,
+                          help="Scan the clock offset over a wide window around the start time (1 s steps), "
+                               "then refine each candidate area at the normal step. Slower, and more passes are "
+                               "needed: with one pass, position and time trade off.")
+        twin = u2.number_input("Time window ± (s)", value=600, min_value=10, max_value=3600, step=60,
+                               disabled=not unk)
         if st.button("Run search", type="primary"):
             frame, dem, c = env(M, slat, slon)
             trajs = trajs_for(S, M, frame)
             tracks = from_frame(pd.read_csv(S / "tracks.csv"))
             cfg = SearchConfig(radius_km=srad, coarse_m=coarse, fine_m=fine, dt_max=dtm, audible_m=aud,
                                wind=session_wind(M),
-                               max_range_m=mrng, obs_agl=float(M.get("obs_agl", 1.5)), event_weight=ev_w)
+                               max_range_m=mrng, obs_agl=float(M.get("obs_agl", 1.5)), event_weight=ev_w,
+                               time_window_s=float(twin) if unk else 0.0)
             events = events_from_frame(pd.read_csv(S / "events.csv")) if use_ev else []
             box = st.empty()
             with st.spinner("Grid search…"):
                 res = search(tracks, trajs, frame, dem, float(M["t0"]), float(M.get("duration", 300)), c, cfg,
                              log=lambda msg: box.caption(msg), events=events)
             res.to_csv(S / "candidates.csv", index=False)
-            save_meta(S, center_lat=slat, center_lon=slon, search_coarse_m=coarse, search_fine_m=fine)
+            save_meta(S, center_lat=slat, center_lon=slon, search_coarse_m=coarse, search_fine_m=fine,
+                      search_time_window=float(twin) if unk else 0.0)
             st.rerun()
         if (S / "candidates.csv").exists():
             res = pd.read_csv(S / "candidates.csv")
@@ -505,6 +514,16 @@ with tabs[4]:
             if "event_lag" in res.columns and any(c.startswith("ev") and c.endswith("_flight") for c in res.columns):
                 a3.metric("Loudness events: lag", f"{b.event_lag:+.0f} s",
                           help="loudness peak − heard CPA, shared by all events (fitted)")
+            if float(M.get("search_time_window", 0)) > 0:
+                t_est = pd.Timestamp(float(M["t0"]) + float(b["dt"]), unit="s", tz="UTC")
+                other = res[(res["dt"] - b["dt"]).abs() > 20]
+                t1, t2 = st.columns(2)
+                t1.metric("Estimated start time (UTC)", t_est.strftime("%Y-%m-%d %H:%M:%S"),
+                          help=f"offset {b['dt']:+.1f} s from the start time of the Audio tab")
+                if len(other):
+                    t2.metric("Best other time: margin", f"{other.iloc[0].cost - b.cost:.2f}",
+                              help=f"best point at an offset more than 20 s away ({other.iloc[0]['dt']:+.0f} s). "
+                                   "A small margin means the time is ambiguous.")
 
             # ---- relative cost classes (cost / best cost) ----
             CLASSES = [  # (key, label, upper bound of the ratio, RGB colour)

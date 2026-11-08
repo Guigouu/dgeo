@@ -6,7 +6,8 @@ Two paths, same output format (CSV, one row per position):
 1. ``live``  — poll a public API in ADSBExchange v2 format while recording
    (adsb.lol or airplanes.live, ~1 req/s max). Simplest option for the POC: no large download.
 2. ``hist``  — read the daily readsb traces published by adsb.lol
-   (github.com/adsblol/globe_history_<year>, ODbL licence) after extraction.
+   (github.com/adsblol/globe_history_<year>, ODbL licence) after extraction, or ``hist_tar`` to
+   stream them straight from the (split) release archive, without extracting it to disk.
 
 Columns: t (unix s, time of the position), hex, flight, type, category, lat, lon,
 alt_baro (ft), alt_geom (ft, HAE WGS84), gs (kt), track (deg), src.
@@ -15,10 +16,12 @@ from __future__ import annotations
 
 import csv
 import gzip
+import io
 import json
 import math
 import os
 import sys
+import tarfile
 import time
 from pathlib import Path
 
@@ -208,21 +211,53 @@ def live(lat: float, lon: float, radius_nm: float, out: str, provider: str = "bo
     log(f"[live] done: {n_rows} positions ({stats})")
 
 
-def _open_maybe_gzip(path: Path):
-    with open(path, "rb") as fh:
-        magic = fh.read(2)
-    return gzip.open(path, "rt") if magic == b"\x1f\x8b" else open(path, "rt")
+def _load_trace(raw: bytes):
+    """A readsb ``trace_full_*.json`` file, gzip-compressed or not."""
+    if raw[:2] == b"\x1f\x8b":
+        raw = gzip.decompress(raw)
+    return json.loads(raw)
+
+
+class _Window:
+    """Area + time filter applied to readsb traces."""
+
+    def __init__(self, t_start, t_end, lat, lon, radius_km):
+        self.t_start, self.t_end, self.lat, self.lon = t_start, t_end, lat, lon
+        self.dlat = radius_km / 111.0
+        self.dlon = radius_km / (111.0 * math.cos(math.radians(lat)))
+
+    def rows(self, js: dict, default_hex: str) -> list:
+        """Format of a readsb trace point:
+          [dt, lat, lon, alt_baro|"ground"|null, gs, track, flags, vrate, details|null, src_type,
+           alt_geom|null, geom_rate, ias, roll]
+        """
+        base = float(js.get("timestamp", 0))
+        tr = js.get("trace") or []
+        if not tr or base + tr[-1][0] < self.t_start or base + tr[0][0] > self.t_end:
+            return []
+        hx = js.get("icao", default_hex)
+        typ = js.get("t")
+        flight, cat, out = None, None, []
+        for pt in tr:
+            t = base + pt[0]
+            det = pt[8] if len(pt) > 8 and isinstance(pt[8], dict) else None
+            if det:  # callsign / category are only sent now and then: keep the latest seen
+                flight = (det.get("flight") or "").strip() or flight
+                cat = det.get("category") or cat
+            if t < self.t_start or t > self.t_end:
+                continue
+            la, lo = pt[1], pt[2]
+            if la is None or lo is None or abs(la - self.lat) > self.dlat or abs(lo - self.lon) > self.dlon:
+                continue
+            out.append([t, hx, flight, typ, cat, la, lo, _num(pt[3]),
+                        _num(pt[10]) if len(pt) > 10 else None, _num(pt[4]), _num(pt[5]),
+                        pt[9] if len(pt) > 9 else None])
+        return out
 
 
 def hist(traces_dir: str, t_start: float, t_end: float, lat: float, lon: float, radius_km: float) -> pd.DataFrame:
-    """Read ``trace_full_<hex>.json`` files (readsb) and filter by area + time window.
-
-    Format of a readsb trace point:
-      [dt, lat, lon, alt_baro|"ground"|null, gs, track, flags, vrate, details|null, src_type,
-       alt_geom|null, geom_rate, ias, roll]
-    """
-    dlat = radius_km / 111.0
-    dlon = radius_km / (111.0 * math.cos(math.radians(lat)))
+    """Read extracted ``trace_full_<hex>.json`` files (readsb) and filter by area + time window."""
+    win = _Window(t_start, t_end, lat, lon, radius_km)
     rows = []
     files = list(Path(traces_dir).rglob("trace_full_*.json"))
     if not files:
@@ -231,31 +266,60 @@ def hist(traces_dir: str, t_start: float, t_end: float, lat: float, lon: float, 
         if i % 5000 == 0:
             print(f"\r[hist] {i}/{len(files)} files", end="", file=sys.stderr)
         try:
-            with _open_maybe_gzip(p) as fh:
-                js = json.load(fh)
+            js = _load_trace(p.read_bytes())
         except Exception:
             continue
-        base = float(js.get("timestamp", 0))
-        tr = js.get("trace") or []
-        if not tr or base + tr[-1][0] < t_start or base + tr[0][0] > t_end:
-            continue
-        hx = js.get("icao", p.stem.replace("trace_full_", ""))
-        typ = js.get("t")
-        flight = None
-        for pt in tr:
-            t = base + pt[0]
-            if t < t_start or t > t_end:
-                continue
-            la, lo = pt[1], pt[2]
-            if abs(la - lat) > dlat or abs(lo - lon) > dlon:
-                continue
-            det = pt[8] if len(pt) > 8 and isinstance(pt[8], dict) else None
-            if det and det.get("flight"):
-                flight = det["flight"].strip()
-            rows.append([t, hx, flight, typ, (det or {}).get("category"), la, lo, _num(pt[3]),
-                         _num(pt[10]) if len(pt) > 10 else None, _num(pt[4]), _num(pt[5]),
-                         pt[9] if len(pt) > 9 else None])
+        rows += win.rows(js, p.stem.replace("trace_full_", ""))
     print(f"\r[hist] {len(files)} files read, {len(rows)} positions kept", file=sys.stderr)
+    return pd.DataFrame(rows, columns=COLUMNS)
+
+
+class _Concat(io.RawIOBase):
+    """Read several files (the ``.tar.aa``, ``.tar.ab``, … parts of a release) as one stream."""
+
+    def __init__(self, paths):
+        self.paths, self.fh = list(paths), None
+
+    def readable(self):
+        return True
+
+    def readinto(self, b):
+        while True:
+            if self.fh is None:
+                if not self.paths:
+                    return 0
+                p = self.paths.pop(0)
+                self.fh = sys.stdin.buffer if p == "-" else open(p, "rb")
+            n = self.fh.readinto(b)
+            if n:
+                return n
+            if self.fh is not sys.stdin.buffer:
+                self.fh.close()
+            self.fh = None
+
+
+def hist_tar(parts: list[str], t_start: float, t_end: float, lat: float, lon: float, radius_km: float,
+             log=lambda m: print(m, file=sys.stderr)) -> pd.DataFrame:
+    """Stream a globe_history release archive (its split parts in order, or "-" for stdin) and keep only the
+    positions inside the area and time window. Nothing is extracted to disk, so a day of worldwide traces
+    (several GB) can be filtered on a small machine, even while it downloads."""
+    win = _Window(t_start, t_end, lat, lon, radius_km)
+    rows, n = [], 0
+    stream = io.BufferedReader(_Concat(sorted(parts) if "-" not in parts else parts), buffer_size=1 << 20)
+    with tarfile.open(fileobj=stream, mode="r|*") as tar:
+        for m in tar:
+            name = m.name.rsplit("/", 1)[-1]
+            if not (m.isfile() and name.startswith("trace_full_")):
+                continue
+            n += 1
+            if n % 20000 == 0:
+                log(f"[hist] {n} traces read, {len(rows)} positions kept")
+            try:
+                js = _load_trace(tar.extractfile(m).read())
+            except Exception:
+                continue
+            rows += win.rows(js, name.split(".")[0].replace("trace_full_", ""))
+    log(f"[hist] {n} traces read, {len(rows)} positions kept")
     return pd.DataFrame(rows, columns=COLUMNS)
 
 

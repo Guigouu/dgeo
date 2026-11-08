@@ -62,11 +62,16 @@ def cmd_adsb_live(a):
 
 
 def cmd_adsb_hist(a):
-    from .adsb import hist
+    from .adsb import hist, hist_tar
 
     t0 = parse_time(a.start)
     t1 = parse_time(a.end)
-    df = hist(a.traces_dir, t0, t1, a.lat, a.lon, a.radius_km)
+    if bool(a.traces_dir) == bool(a.tar):
+        raise SystemExit("give either --traces-dir (extracted) or --tar (archive parts, or - for stdin)")
+    if a.tar:
+        df = hist_tar(a.tar, t0, t1, a.lat, a.lon, a.radius_km)
+    else:
+        df = hist(a.traces_dir, t0, t1, a.lat, a.lon, a.radius_km)
     df.to_csv(a.out, index=False)
     print(f"[hist] -> {a.out}", file=sys.stderr)
 
@@ -156,7 +161,8 @@ def cmd_search(a):
         dur = len(x) / fs
     cfg = SearchConfig(radius_km=a.radius_km, coarse_m=a.coarse, fine_m=a.fine, dt_max=a.dt_max,
                        max_range_m=a.max_range, audible_m=a.audible, obs_agl=a.obs_agl,
-                       event_weight=a.event_weight, wind=_wind(a))
+                       event_weight=a.event_weight, wind=_wind(a),
+                       time_window_s=a.time_window, time_step_s=a.time_step, workers=a.workers)
     df = search(tracks, trajs, frame, dem, parse_time(a.t0), dur, c, cfg,
                 log=lambda m: print(m, file=sys.stderr), events=events)
     out = Path(a.out_dir)
@@ -165,8 +171,21 @@ def cmd_search(a):
     _geojson(df.head(50), out / "top50.geojson")
     truth = json.loads(Path(a.truth).read_text()) if a.truth else None
     heatmap_fig(df, truth, out=out / "heatmap.png", title="cost per grid point (track mode)")
-    _report(df, truth, coarse_m=a.coarse)
+    _report(df, truth, coarse_m=a.coarse, t0=parse_time(a.t0) if a.time_window > a.dt_max else None)
     print(f"-> {out}/candidates.csv, top50.geojson, heatmap.png")
+
+
+def cmd_merge(a):
+    """Costs are absolute (same tracks, same ADS-B, same parameters), so searches run separately on
+    adjacent tiles can be merged by sorting. Different centres give different e/n frames: keep lat/lon."""
+    import pandas as pd
+
+    dfs = [pd.read_csv(p).assign(source=p) for p in a.inputs]
+    df = pd.concat(dfs, ignore_index=True).sort_values("cost", ignore_index=True)
+    df.to_csv(a.out, index=False)
+    b = df.iloc[0]
+    print(f"{len(df)} points from {len(dfs)} files; best {b.lat:.5f}, {b.lon:.5f} cost {b.cost:.2f} ({b.source})")
+    print(f"-> {a.out}")
 
 
 def _geojson(df, path):
@@ -182,7 +201,7 @@ def haversine(lat1, lon1, lat2, lon2):
     return 2 * 6371000 * np.arcsin(np.sqrt(a))
 
 
-def _report(df, truth=None, coarse_m: float = 250.0):
+def _report(df, truth=None, coarse_m: float = 250.0, t0: float | None = None):
     from .search import candidate_area
 
     trk_cols = [c[:-7] for c in df.columns if c.endswith("_flight") and c.startswith("trk")]
@@ -196,6 +215,15 @@ def _report(df, truth=None, coarse_m: float = 250.0):
         f = far.iloc[0]
         print(f"\n 2nd distinct zone (>300 m): cost {f.cost:.2f} at {haversine(f.lat, f.lon, b.lat, b.lon):.0f} m "
               f"-> margin {f.cost - b.cost:.2f} (ratio {f.cost / max(b.cost, 1e-6):.1f}x)")
+    if t0 is not None:  # unknown time: estimated start time and the best alternative time
+        import datetime as _dt
+        iso = _dt.datetime.fromtimestamp(t0 + b["dt"], _dt.timezone.utc).isoformat(timespec="seconds")
+        print(f" estimated start time: {iso} (offset {b['dt']:+.1f} s from --t0)")
+        other = df[(df["dt"] - b["dt"]).abs() > 20]
+        if len(other):
+            o = other.iloc[0]
+            print(f" best other time (>20 s away): offset {o['dt']:+.0f} s, cost {o.cost:.2f} "
+                  f"(margin {o.cost - b.cost:.2f})")
     for d, (area, radius) in candidate_area(df, coarse_m).items():
         print(f" candidate area (cost <= min + {d}): {area:.2f} km², up to {radius:.0f} m from the best point")
     if "event_lag" in df.columns and any(c.startswith("ev") and c.endswith("_flight") for c in df.columns):
@@ -272,7 +300,9 @@ def build_parser():
     s.set_defaults(fn=cmd_adsb_live)
 
     s = sub.add_parser("adsb-hist", help="extract an area/time window from adsb.lol globe_history traces")
-    s.add_argument("--traces-dir", required=True)
+    s.add_argument("--traces-dir", help="directory of extracted trace_full_*.json files")
+    s.add_argument("--tar", nargs="+", help="release archive parts (.tar.aa .tar.ab …) read as one stream, "
+                                            "or - to read the archive from stdin (no extraction)")
     s.add_argument("--start", required=True)
     s.add_argument("--end", required=True)
     s.add_argument("--lat", type=float, required=True)
@@ -324,11 +354,20 @@ def build_parser():
     s.add_argument("--coarse", type=float, default=250)
     s.add_argument("--fine", type=float, default=25)
     s.add_argument("--dt-max", type=float, default=3.0)
+    s.add_argument("--time-window", type=float, default=0.0,
+                   help="unknown recording time: scan the clock offset over ±S seconds around --t0 (e.g. 600)")
+    s.add_argument("--time-step", type=float, default=1.0, help="clock-offset step of the wide scan (s)")
+    s.add_argument("--workers", type=int, default=1, help="processes for the grid scoring (e.g. number of CPUs)")
     s.add_argument("--max-range", type=float, default=8000)
     s.add_argument("--audible", type=float, default=2000)
     s.add_argument("--truth", help="truth.json (to compute the position error)")
     s.add_argument("--out-dir", default="out")
     s.set_defaults(fn=cmd_search)
+
+    s = sub.add_parser("merge", help="merge candidates.csv files of searches run on separate tiles / machines")
+    s.add_argument("inputs", nargs="+", help="candidates.csv files")
+    s.add_argument("--out", default="candidates_merged.csv")
+    s.set_defaults(fn=cmd_merge)
 
     s = sub.add_parser("synth", help="generate a synthetic scenario")
     s.add_argument("--out-dir", default="synth")

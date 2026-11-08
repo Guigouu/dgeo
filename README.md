@@ -37,7 +37,7 @@ the video's author.
 | 1. Field test, known position | Predicted curves must overlay observed ones | ✅ A jet tone overlaid within ~2 s of clock offset |
 | 2. Search at known time | Recover one's own position | 🟡 One tonal pass gives a ~2 km plateau; the experimental loudness-event term (jets) shrank it ~4× on a field recording; needs more field data |
 | 3. Robustness | Indoors, phone calls, jets only, … | to do |
-| 4. Extensions | Unknown time, historical data, wind, distributed search | to do |
+| 4. Extensions | Unknown time, historical data, wind, distributed search | 🟡 Implemented, validated on synthetic data only: unknown start time (`--time-window`), streamed historical ADS-B (`adsb-hist --tar`), uniform wind, multi-process and tiled search (`--workers`, `dgeo merge`) |
 
 ## Responsible use
 
@@ -116,6 +116,10 @@ dgeo overlay --wav rec.wav --flights flights.csv --t0 2026-01-15T10:15:03+01:00 
 dgeo search --tracks tracks.csv --flights flights.csv --wav rec.wav \
     --t0 2026-01-15T10:15:03+01:00 --lat <lat> --lon <lon> --radius-km 10 --out-dir out/
 #   add --events events.csv to also use broadband jet passes (experimental)
+#   add --time-window 600 if the start time is only known to ±10 min; --workers 4 to use 4 CPUs
+
+# past recording: stream a day of adsb.lol history and keep only your area/time window (see FIELD_GUIDE)
+dgeo adsb-hist --tar day.tar.a* --start <iso> --end <iso> --lat <lat> --lon <lon> --out flights.csv
 
 # synthetic end-to-end demo (dgeo synth --broadband-jets adds jets heard as noise only)
 dgeo demo --out-dir demo/
