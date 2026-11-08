@@ -149,7 +149,7 @@ tests/          physics, metadata timing, end to end
 
 ## Known limitations
 
-- **Wind** is not modelled (effective speed of sound changes by a few m/s along the ray).
+- **Wind** is modelled as one uniform vector from the surface report (`--wind-speed`, `--wind-from`, sidebar); wind aloft is not.
 - **Light aviation**: in Europe ADS-B Out is only mandatory above 5.7 t or 250 kt; many small aircraft
   do not broadcast positions. Turboprops, equipped helicopters and jets are the useful targets.
 - **Jets** are mostly broadband noise, which tone detection ignores; only their occasional tones are used.

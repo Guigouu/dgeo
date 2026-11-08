@@ -45,7 +45,8 @@ CATEGORY = {"AT76": "A2", "C172": "A1", "PA28": "A1", "A320": "A3", "A321": "A3"
             "B38M": "A3", "B738": "A3"}
 
 
-def make(out_dir: str, seed: int = 1, dur: float = 300.0, fs: int = 8000, broadband_jets: bool = False):
+def make(out_dir: str, seed: int = 1, dur: float = 300.0, fs: int = 8000, broadband_jets: bool = False,
+         wind=None):
     """``broadband_jets``: add jets 4–7 km away rendered as broadband noise (no tone), for the
     loudness-event term; the recording is then lengthened to at least 600 s."""
     if broadband_jets:
@@ -120,9 +121,10 @@ def make(out_dir: str, seed: int = 1, dur: float = 300.0, fs: int = 8000, broadb
     for hx, (tj, f0) in tracks_true.items():
         if f0 is None:
             continue
-        _, _, vel, R, rvec, valid = emission(tj, obs[None, :], tg, c)
+        _, _, vel, R, rvec, valid = emission(tj, obs[None, :], tg, c, wind=wind)
         rdot = np.sum(rvec * vel, axis=-1)[0] / R[0]
-        fo = f0 * c / (c + rdot)
+        ce = c if wind is None else c - (rvec[0] @ np.asarray(wind, float)) / R[0]
+        fo = f0 * ce / (ce + rdot)
         amp = np.where(valid[0], 0.012 * (600.0 / R[0]) ** 1.2, 0.0)
         f_s = np.interp(ta, tg, fo)
         a_s = np.interp(ta, tg, amp)
@@ -135,7 +137,7 @@ def make(out_dir: str, seed: int = 1, dur: float = 300.0, fs: int = 8000, broadb
         for hx, (tj, f0) in tracks_true.items():
             if f0 is not None or CATEGORY.get(dict((s_[0], s_[2]) for s_ in specs)[hx]) != "A3":
                 continue
-            _, _, _, R, _, valid = emission(tj, obs[None, :], tg, c)
+            _, _, _, R, _, valid = emission(tj, obs[None, :], tg, c, wind=wind)
             amp = np.where(valid[0], 0.15 * (4000.0 / R[0]) ** 2, 0.0)
             x += np.interp(ta, tg, amp) * sosfilt(sos, rng.normal(0, 1, n))
     x = x / (np.abs(x).max() * 1.05)
@@ -145,7 +147,7 @@ def make(out_dir: str, seed: int = 1, dur: float = 300.0, fs: int = 8000, broadb
     truth = {"lat": float(lat), "lon": float(lon), "t0_reported": t0_reported, "clock_error_s": clock_err,
              "duration_s": dur, "ground_ortho_m": GROUND, "geoid_n": SYNTH_GEOID_N, "temp_c": 15.0,
              "center": CENTER, "audible": [s[1] for s in specs if s[-1] is not None],
-             "broadband_jets": broadband_jets}
+             "broadband_jets": broadband_jets, "wind": None if wind is None else list(map(float, wind))}
     (out / "truth.json").write_text(json.dumps(truth, indent=2))
     return truth
 

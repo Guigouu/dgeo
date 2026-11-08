@@ -32,6 +32,7 @@ class SearchConfig:
     obs_agl: float = 1.5          # microphone height above ground (m)
     max_samples: int = 120        # points per track used for scoring
     min_coverage: float = 0.8
+    wind: tuple[float, float, float] | None = None  # uniform wind, ENU m/s (see geo.wind_vector)
     # loudness (broadband) events, see dgeo/events.py
     event_range_m: float = 9000.0  # max slant range at CPA for a LARGE aircraft (ADS-B category A2-A6)
     event_range_light_m: float = 2500.0  # same for light / rotorcraft / unknown category
@@ -121,7 +122,7 @@ def score_points(obs: np.ndarray, tracks: list[TrackObs], trajs: list[Trajectory
     for k, tj in enumerate(trajs):
         if tj.t[-1] < t0 - 90 or tj.t[0] > t0 + dur + 10:
             continue
-        rmin_all[k], tcpa_all[k] = cpa(tj, obs, c)
+        rmin_all[k], tcpa_all[k] = cpa(tj, obs, c, cfg.wind)
 
     for i, tr in enumerate(tracks):
         tk, fk = _sub(tr, cfg.max_samples)
@@ -138,7 +139,7 @@ def score_points(obs: np.ndarray, tracks: list[TrackObs], trajs: list[Trajectory
             cand = np.where(rmin_all[k] < cfg.max_range_m)[0]
             for s in range(0, len(cand), chunk):
                 idx = cand[s:s + chunk]
-                ru, _, vu = doppler_ratio(tj, obs[idx], t0 + u, c)          # (m,U)
+                ru, _, vu = doppler_ratio(tj, obs[idx], t0 + u, c, cfg.wind)          # (m,U)
                 ratio = ru[:, j0] * (1 - w) + ru[:, j0 + 1] * w              # (m,D,K)
                 valid = vu[:, j0] & vu[:, j0 + 1]
                 cst, lnf0 = track_cost(ratio, valid, fk, cfg.min_coverage)
@@ -251,7 +252,7 @@ def search(tracks: list[TrackObs], trajs: list[Trajectory], frame: LocalFrame, d
 
 def overlay_curves(sp: Spectro, trajs: list[Trajectory], obs: np.ndarray, t0: float, c: float,
                    max_range_m: float = 8000.0, dt_max: float = 5.0, dt_step: float = 0.25,
-                   fmin: float = 40.0, fmax: float = 1500.0, n_harm: int = 4):
+                   fmin: float = 40.0, fmax: float = 1500.0, n_harm: int = 4, wind=None):
     """Phase 1: at a known position, the predicted curve of each nearby flight, with f0 fitted on the spectrogram.
     Returns (list of dicts, best clock dt)."""
     dur = float(sp.t[-1])
@@ -259,7 +260,7 @@ def overlay_curves(sp: Spectro, trajs: list[Trajectory], obs: np.ndarray, t0: fl
     for tj in trajs:
         if tj.t[-1] < t0 - 90 or tj.t[0] > t0 + dur + 10:
             continue
-        r, th = cpa(tj, obs[None, :], c)
+        r, th = cpa(tj, obs[None, :], c, wind)
         if r[0] < max_range_m and -60 < th[0] - t0 < dur + 60:
             cands.append((tj, float(r[0]), float(th[0] - t0)))
     cache: dict = {}
@@ -268,7 +269,7 @@ def overlay_curves(sp: Spectro, trajs: list[Trajectory], obs: np.ndarray, t0: fl
     for dt in dts:
         res = []
         for tj, rmin, th in cands:
-            ratio, R, valid = doppler_ratio(tj, obs[None, :], t0 + sp.t + dt, c)
+            ratio, R, valid = doppler_ratio(tj, obs[None, :], t0 + sp.t + dt, c, wind)
             valid = valid[0] & (R[0] < max_range_m)
             sc, f0 = energy_fit(sp, ratio[0], valid, fmin, fmax, n_harm, cache=cache)
             res.append({"label": tj.label(), "hex": tj.hex, "cpa_m": rmin, "cpa_heard_s": th,

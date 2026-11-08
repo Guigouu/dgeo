@@ -46,6 +46,15 @@ one (see `test_naive_model_is_wrong`). `c = 331.3·√(1 + T/273.15)`.
 The ratio `f_obs/f0` is the same for every harmonic: we never know which harmonic a track follows,
 and we do not need to.
 
+### Wind (optional)
+
+A uniform horizontal wind `w` (from the METAR: speed, direction it blows FROM) changes the sound speed
+along each ray: `c_eff = c + w·n`, with `n` the unit vector from the source to the observer. It enters
+both the retarded time (`t_obs = t_e + R / c_eff`) and the Doppler ratio, `f_obs = f0·c_eff / (c_eff + Ṙ)`
+(in the air frame the observer moves at `−w` and the source at `v − w`). On synthetic scenarios with a
+12 m/s wind, modelling it reduced the error from 26 to 15 m and from 42 to 33 m: a second-order effect for
+passes within ~1 km, larger for distant ones. Wind aloft differs from the surface wind; a single value is used.
+
 ## 4. Spectrogram
 
 - resampling to 8 kHz, 1 s Hann STFT, 0.25 s hop (≈ 1 Hz resolution);
@@ -136,7 +145,7 @@ curve stands out. The clock offset `dt` is swept globally. This produces the plo
 
 ## 9. Known limitations and ideas
 
-- **Wind** is not modelled: `c_eff = c + w·û` along the ray (METAR / model profile).
+- **Wind** is modelled as a single uniform vector (surface METAR); a vertical profile would be better for high passes.
 - **Jets** are mostly broadband. Their loudness peaks are still informative (in field tests they
   preceded the heard CPA by a fairly constant 10–20 s); a timing-based term could use them.
 - **Ground reflection (Lloyd's mirror)** is another way to exploit broadband jets: the direct and

@@ -23,6 +23,12 @@ def parse_time(s: str) -> float:
         return dt.timestamp()
 
 
+def _wind(a):
+    from .geo import wind_vector
+
+    return tuple(wind_vector(a.wind_speed, a.wind_from)) if getattr(a, "wind_speed", 0.0) else None
+
+
 def _env(a):
     """Shared objects: local frame, DEM, speed of sound."""
     from .geo import Dem, LocalFrame, speed_of_sound
@@ -111,7 +117,7 @@ def cmd_overlay(a):
     sp = _spectro(a)
     _, _, obs = observers(frame, dem, np.array([0.0]), np.array([0.0]), a.obs_agl)
     curves, dt = overlay_curves(sp, trajs, obs[0], parse_time(a.t0), c, a.max_range, a.dt_max,
-                                fmin=a.fmin, fmax=a.fmax)
+                                fmin=a.fmin, fmax=a.fmax, wind=_wind(a))
     tracks = from_frame(pd.read_csv(a.tracks)) if a.tracks else None
     for cv in sorted(curves, key=lambda x: x["cpa_heard_s"]):
         print(f"  {cv['label']:<22} CPA {cv['cpa_m']:6.0f} m at {cv['cpa_heard_s']:6.1f}s  "
@@ -150,7 +156,7 @@ def cmd_search(a):
         dur = len(x) / fs
     cfg = SearchConfig(radius_km=a.radius_km, coarse_m=a.coarse, fine_m=a.fine, dt_max=a.dt_max,
                        max_range_m=a.max_range, audible_m=a.audible, obs_agl=a.obs_agl,
-                       event_weight=a.event_weight)
+                       event_weight=a.event_weight, wind=_wind(a))
     df = search(tracks, trajs, frame, dem, parse_time(a.t0), dur, c, cfg,
                 log=lambda m: print(m, file=sys.stderr), events=events)
     out = Path(a.out_dir)
@@ -241,6 +247,8 @@ def build_parser():
         s.add_argument("--qnh", type=float, default=1013.25, help="QNH (hPa), e.g. from the nearest airport METAR")
         s.add_argument("--alt-source", choices=["auto", "geom", "baro"], default="auto")
         s.add_argument("--temp-c", type=float, default=15.0, help="air temperature (°C)")
+        s.add_argument("--wind-speed", type=float, default=0.0, help="wind speed (m/s; 1 kt = 0.514 m/s)")
+        s.add_argument("--wind-from", type=float, default=0.0, help="direction the wind blows FROM (deg, METAR)")
         s.add_argument("--obs-agl", type=float, default=1.5, help="microphone height above ground (m)")
 
     def audio_args(s, required=True):
