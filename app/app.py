@@ -131,6 +131,31 @@ def place_picker(S: Path, key: str, lat_key: str, lon_key: str, label: str):
             st.rerun()
 
 
+def zone_map(S: Path, key: str, lat: float, lon: float, radius_m: float):
+    """Map of the capture zone (circle = radius). A click on the map moves the centre there."""
+    try:
+        import folium
+        from streamlit_folium import st_folium
+    except ImportError:  # optional: pip install streamlit-folium
+        return
+    unset = lat == 0.0 and lon == 0.0
+    m = folium.Map(location=[20.0, 0.0] if unset else [lat, lon], zoom_start=2 if unset else 9,
+                   control_scale=True)
+    if not unset:
+        folium.Circle([lat, lon], radius=radius_m, color="#c0392b", weight=2, fill=True, fill_opacity=0.08,
+                      tooltip=f"capture zone: {radius_m / 1852:.0f} NM = {radius_m / 1000:.0f} km").add_to(m)
+        folium.CircleMarker([lat, lon], radius=4, color="#c0392b", fill=True).add_to(m)
+    st.caption("Click the map to move the centre. Only aircraft inside the circle are captured; the centre "
+               "does not need to be your exact position: any point a few km away works.")
+    out = st_folium(m, height=380, use_container_width=True, key=f"zone_{key}",
+                    returned_objects=["last_clicked"])
+    click = (out or {}).get("last_clicked")
+    if click and st.session_state.get(f"zone_{key}_done") != click:
+        st.session_state[f"zone_{key}_done"] = click
+        save_meta(S, center_lat=round(click["lat"], 5), center_lon=round(((click["lng"] + 180) % 360) - 180, 5))
+        st.rerun()
+
+
 def capture_running(name: str) -> bool:
     p = procs().get(name)
     return p is not None and p.poll() is None
@@ -242,7 +267,7 @@ tabs = st.tabs([":material/flight: ADS-B", ":material/graphic_eq: Audio", ":mate
 # ---------------------------------------------------------------- 1. ADS-B
 with tabs[0]:
     st.markdown("Start the capture **before** you start recording audio, and stop it a few minutes after.")
-    place_picker(S, "adsb_place", "center_lat", "center_lon", "Centre: address or coordinates")
+    place_picker(S, "adsb_place", "center_lat", "center_lon", "Centre: address, coordinates, or click the map below")
     M = load_meta(S)
     c1, c2, c3, c4 = st.columns(4)
     lat_c = c1.number_input("Centre latitude", value=float(M.get("center_lat", 0.0)), format="%.5f")
@@ -250,6 +275,7 @@ with tabs[0]:
     rad = c3.number_input("Radius (NM)", value=15, min_value=1, max_value=100)
     prov = c4.selectbox("Provider", ["both", "adsblol", "airplaneslive"],
                         help="both: alternates adsb.lol / airplanes.live, each within its own rate limit")
+    zone_map(S, cur, lat_c, lon_c, rad * 1852.0)
     running = capture_running(cur)
     no_centre = lat_c == 0.0 and lon_c == 0.0
     if no_centre and not running:

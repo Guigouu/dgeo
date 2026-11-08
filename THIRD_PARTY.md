@@ -12,6 +12,7 @@ with, the following third-party components. Their licences apply to them, not to
 | requests | Apache-2.0 |
 | rasterio | BSD-3-Clause |
 | streamlit, pydeck | Apache-2.0 |
+| folium, streamlit-folium (Leaflet: BSD-2-Clause) | MIT |
 | tzdata | Apache-2.0 |
 | pytest (development only) | MIT |
 
@@ -35,6 +36,12 @@ below and must respect their terms.
 - **airplanes.live** — REST API intended for **non-commercial use**, rate-limited to 1 request per
   second (see <https://airplanes.live/api-guide>). dgeo queries it at most every ~3 s and disables it
   automatically if access is refused.
+
+### Map tiles
+
+- The capture-zone map in the ADS-B tab loads **OpenStreetMap** tiles in your browser (© OpenStreetMap
+  contributors, ODbL; https://operations.osmfoundation.org/policies/tiles/). The tile servers see the
+  area you look at.
 
 ### Geocoding
 

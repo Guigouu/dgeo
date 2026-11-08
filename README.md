@@ -86,7 +86,7 @@ make local-ui
 
 | Tab | Purpose |
 |---|---|
-| ADS-B | Set the centre from an address or pasted coordinates, start/stop a live capture (adsb.lol and/or airplanes.live) inside the container, or import a `flights.csv`. |
+| ADS-B | Set the capture zone on a map (click = centre, circle = radius) or from an address / pasted coordinates, start/stop a live capture (adsb.lol and/or airplanes.live) inside the container, or import a `flights.csv`. |
 | Audio | Import (wav/m4a/mp3/… converted with ffmpeg), start time (pre-filled from file metadata), spectrogram. |
 | Detection | Automatic track extraction + fit (f0, speed, CPA distance). Hand-traced tracks can be imported as CSV. |
 | Overlay | **Phase 1** (optional): at a known position, predicted curves over the spectrogram + estimated clock offset. |
