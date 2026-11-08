@@ -160,11 +160,19 @@ tests/          physics, metadata timing, end to end
 Versions follow [semantic versioning](https://semver.org/) (0.x: anything may change). Releases are
 automatic: when `main` contains a version with no `vX.Y.Z` tag yet, the release workflow runs the tests,
 builds the wheel and the Docker image (`ghcr.io/guigouu/dgeo`), creates the tag and publishes the
-GitHub Release with the matching `CHANGELOG.md` section. To release:
+GitHub Release with the matching `CHANGELOG.md` section.
+
+One release per merged feature or fix:
+
+| Change | Version bump | Example |
+|---|---|---|
+| new feature (`feat`) | minor | 0.2.0 → 0.3.0 |
+| bug fix (`fix`) | patch | 0.3.0 → 0.3.1 |
+| docs, tests, CI only | none: listed under `## Unreleased`, shipped with the next release | |
 
 ```bash
-python scripts/bump_version.py 0.2.0   # bumps pyproject.toml + dgeo/__init__.py, adds a CHANGELOG section
-# fill in CHANGELOG.md, open a PR, merge it -> release published
+python scripts/bump_version.py minor   # or patch: pyproject.toml + dgeo/__init__.py, Unreleased -> X.Y.Z
+# commit with the PR; merging it into main publishes the release
 ```
 
 ## Contributing
