@@ -62,13 +62,15 @@ def cmd_adsb_live(a):
 
 
 def cmd_adsb_hist(a):
-    from .adsb import hist, hist_tar
+    from .adsb import hist, hist_download, hist_tar
 
     t0 = parse_time(a.start)
     t1 = parse_time(a.end)
-    if bool(a.traces_dir) == bool(a.tar):
-        raise SystemExit("give either --traces-dir (extracted) or --tar (archive parts, or - for stdin)")
-    if a.tar:
+    if sum(map(bool, (a.traces_dir, a.tar, a.download))) != 1:
+        raise SystemExit("give one of --download, --tar (archive parts, or - for stdin) or --traces-dir")
+    if a.download:
+        df = hist_download(t0, t1, a.lat, a.lon, a.radius_km, instance=a.instance)
+    elif a.tar:
         df = hist_tar(a.tar, t0, t1, a.lat, a.lon, a.radius_km)
     else:
         df = hist(a.traces_dir, t0, t1, a.lat, a.lon, a.radius_km)
@@ -309,7 +311,10 @@ def build_parser():
     s.add_argument("--out", default="flights.csv")
     s.set_defaults(fn=cmd_adsb_live)
 
-    s = sub.add_parser("adsb-hist", help="extract an area/time window from adsb.lol globe_history traces")
+    s = sub.add_parser("adsb-hist", help="past ADS-B for an area/time window (adsb.lol globe_history archives)")
+    s.add_argument("--download", action="store_true",
+                   help="stream the day(s) from GitHub and filter on the fly (several GB per day, nothing stored)")
+    s.add_argument("--instance", default="prod-0", help="archive instance: prod-0 (default), staging-0, mlatonly-0")
     s.add_argument("--traces-dir", help="directory of extracted trace_full_*.json files")
     s.add_argument("--tar", nargs="+", help="release archive parts (.tar.aa .tar.ab …) read as one stream, "
                                             "or - to read the archive from stdin (no extraction)")

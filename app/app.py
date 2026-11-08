@@ -266,35 +266,94 @@ tabs = st.tabs([":material/flight: ADS-B", ":material/graphic_eq: Audio", ":mate
 
 # ---------------------------------------------------------------- 1. ADS-B
 with tabs[0]:
-    st.markdown("Start the capture **before** you start recording audio, and stop it a few minutes after.")
+    st.markdown("Where were the aircraft? Set the zone, then either **capture live** while you record, or "
+                "**download the historical traffic** of that zone for a past recording.")
     place_picker(S, "adsb_place", "center_lat", "center_lon", "Centre: address, coordinates, or click the map below")
     M = load_meta(S)
-    c1, c2, c3, c4 = st.columns(4)
+    c1, c2, c3 = st.columns(3)
     lat_c = c1.number_input("Centre latitude", value=float(M.get("center_lat", 0.0)), format="%.5f")
     lon_c = c2.number_input("Centre longitude", value=float(M.get("center_lon", 0.0)), format="%.5f")
     rad = c3.number_input("Radius (NM)", value=15, min_value=1, max_value=100)
-    prov = c4.selectbox("Provider", ["both", "adsblol", "airplaneslive"],
-                        help="both: alternates adsb.lol / airplanes.live, each within its own rate limit")
     zone_map(S, cur, lat_c, lon_c, rad * 1852.0)
-    running = capture_running(cur)
     no_centre = lat_c == 0.0 and lon_c == 0.0
-    if no_centre and not running:
-        st.info("Set the centre first (address or coordinates above): the capture keeps only aircraft within "
-                "the radius of this point.")
-    b1, b2 = st.columns(2)
-    if b1.button("Start capture", icon=":material/play_arrow:", disabled=running or no_centre, type="primary"):
-        save_meta(S, center_lat=lat_c, center_lon=lon_c)
-        log = open(S / "adsb_live.log", "a")
-        procs()[cur] = subprocess.Popen(
-            [sys.executable, "-m", "dgeo", "adsb-live", "--lat", str(lat_c), "--lon", str(lon_c),
-             "--radius-nm", str(rad), "--provider", prov, "--out", str(S / "flights.csv")],
-            stdout=log, stderr=log, cwd=str(Path(__file__).resolve().parents[1]))
-        st.rerun()
-    if b2.button("Stop", icon=":material/stop:", disabled=not running):
-        procs()[cur].send_signal(signal.SIGINT)
-        procs()[cur].wait(timeout=10)
-        st.rerun()
-    st.write("Capture running ✅" if running else "Capture stopped")
+    if no_centre:
+        st.info("Set the centre first (address, coordinates or a click on the map): only aircraft within the "
+                "radius of this point are kept.")
+    mode = st.radio("ADS-B source", ["Live capture", "Historical (adsb.lol archive)"], horizontal=True,
+                    index=1 if M.get("adsb_mode") == "hist" else 0,
+                    help="Live: poll public APIs while you record. Historical: past traffic from the adsb.lol "
+                         "daily archives (ODbL), available ~1–2 days later; nothing to do while recording.")
+    save_meta(S, adsb_mode="hist" if mode.startswith("Hist") else "live")
+    hist_key = f"{cur}#hist"
+    if mode == "Live capture":
+        st.caption("Start the capture **before** you start recording audio, and stop it a few minutes after.")
+        prov = st.selectbox("Provider", ["both", "adsblol", "airplaneslive"],
+                            help="both: alternates adsb.lol / airplanes.live, each within its own rate limit")
+        running = capture_running(cur)
+        b1, b2 = st.columns(2)
+        if b1.button("Start capture", icon=":material/play_arrow:", disabled=running or no_centre, type="primary"):
+            save_meta(S, center_lat=lat_c, center_lon=lon_c)
+            log = open(S / "adsb_live.log", "a")
+            procs()[cur] = subprocess.Popen(
+                [sys.executable, "-m", "dgeo", "adsb-live", "--lat", str(lat_c), "--lon", str(lon_c),
+                 "--radius-nm", str(rad), "--provider", prov, "--out", str(S / "flights.csv")],
+                stdout=log, stderr=log, cwd=str(Path(__file__).resolve().parents[1]))
+            st.rerun()
+        if b2.button("Stop", icon=":material/stop:", disabled=not running):
+            procs()[cur].send_signal(signal.SIGINT)
+            procs()[cur].wait(timeout=10)
+            st.rerun()
+        st.write("Capture running ✅" if running else "Capture stopped")
+    else:
+        tz_h = M.get("tz", "UTC")
+        z = ZoneInfo(tz_h)
+        if M.get("t0"):  # default: the recording, with 5 min of margin
+            a0 = datetime.fromtimestamp(float(M["t0"]) - 300, z)
+            a1 = datetime.fromtimestamp(float(M["t0"]) + float(M.get("duration", 0)) + 300 + 59, z)
+        else:
+            a1 = datetime.now(z).replace(second=0, microsecond=0) - pd.Timedelta(days=2)
+            a0 = a1 - pd.Timedelta(hours=1)
+        a0, a1 = a0.replace(second=0, microsecond=0), a1.replace(second=0, microsecond=0)  # whole minutes, outwards
+        h1, h2, h3 = st.columns(3)
+        d_h = h1.date_input("Day", value=a0.date(), key="hist_day")
+        t_h0 = h2.time_input(f"From ({tz_h})", value=a0.time(), step=60, key="hist_t0")
+        t_h1 = h3.time_input(f"To ({tz_h})", value=a1.time(), step=60, key="hist_t1")
+        ts0 = datetime.combine(d_h, t_h0, z).timestamp()
+        ts1 = datetime.combine(d_h, t_h1, z).timestamp()
+        if ts1 <= ts0:  # window crossing midnight
+            ts1 += 86400
+        inst = st.selectbox("Archive", ["prod-0", "staging-0"], help="prod-0: main adsb.lol feed; staging-0: "
+                            "fallback when prod is incomplete for that day")
+        st.caption(f"Window {datetime.fromtimestamp(ts0, timezone.utc):%Y-%m-%d %H:%M} → "
+                   f"{datetime.fromtimestamp(ts1, timezone.utc):%H:%M} UTC. Each UTC day touched is streamed from "
+                   "GitHub (several GB, a few minutes to tens of minutes depending on your connection) and filtered "
+                   "on the fly; only the positions inside the zone are kept. Include the whole recording plus a "
+                   "few minutes on each side. Days are published ~1–2 days later.")
+        hrun = capture_running(hist_key)
+        too_recent = ts1 > time.time() - 86400
+        if too_recent:
+            st.warning("This window is less than a day old: the archive is probably not published yet. "
+                       "Use the live capture for recordings in progress.")
+        g1, g2 = st.columns(2)
+        if g1.button("Download & filter", icon=":material/cloud_download:", type="primary",
+                     disabled=hrun or no_centre or capture_running(cur)):
+            save_meta(S, center_lat=lat_c, center_lon=lon_c)
+            log = open(S / "adsb_hist.log", "a")
+            iso = lambda t: datetime.fromtimestamp(t, timezone.utc).isoformat()  # noqa: E731
+            procs()[hist_key] = subprocess.Popen(
+                [sys.executable, "-m", "dgeo", "adsb-hist", "--download", "--instance", inst,
+                 "--start", iso(ts0), "--end", iso(ts1), "--lat", str(lat_c), "--lon", str(lon_c),
+                 "--radius-km", str(rad * 1.852), "--out", str(S / "flights.csv")],
+                stdout=log, stderr=log, cwd=str(Path(__file__).resolve().parents[1]))
+            st.rerun()
+        if g2.button("Cancel", icon=":material/stop:", disabled=not hrun):
+            procs()[hist_key].terminate()
+            procs()[hist_key].wait(timeout=10)
+            st.rerun()
+        st.write("Download running… (Refresh to follow)" if hrun else "")
+        if (S / "adsb_hist.log").exists():
+            with st.expander("Download log", expanded=hrun):
+                st.code((S / "adsb_hist.log").read_text()[-2000:])
     if st.button("Refresh", icon=":material/refresh:"):
         st.rerun()
     up = st.file_uploader("…or import a flights.csv (CLI capture / adsb-hist)", type=["csv"])
