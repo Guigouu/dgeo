@@ -17,6 +17,10 @@ pytest -q
 - Open an issue first for anything beyond a small fix, so the approach can be discussed.
 - Fork, branch, open a pull request against `main`; the CI (tests on Python 3.10 and 3.12, demo,
   Docker build) must pass before merge. Pull requests are squash-merged.
+- Describe your change in `CHANGELOG.md` under `## Unreleased`. Maintainers cut one release per merged
+  feature (minor bump) or fix (patch bump) with `python scripts/bump_version.py minor|patch`; merging a
+  version bump into `main` publishes the GitHub Release automatically. Docs/tests/CI changes ship with
+  the next release.
 - Security issues: see [SECURITY.md](SECURITY.md), never in public issues.
 
 ## Guidelines
