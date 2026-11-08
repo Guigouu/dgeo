@@ -1,7 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.5.0 — 2026-11-08
 
+- Centre from an address or pasted coordinates (ADS-B tab, `dgeo geocode`): coordinates are parsed
+  locally, addresses are looked up with OpenStreetMap Nominatim. The capture can no longer start at 0, 0.
 - Robustness benchmark (`scripts/robustness.py`, `docs/ROBUSTNESS.md`): lossy codecs, phone call,
   high-pass filtering, noise suppression, indoors, speech masking.
 
