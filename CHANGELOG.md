@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Robustness benchmark (`scripts/robustness.py`, `docs/ROBUSTNESS.md`): lossy codecs, phone call,
+  high-pass filtering, noise suppression, indoors, speech masking.
+
 ## 0.4.0 — 2026-11-08
 
 - Unknown start time: `--time-window S` (UI: "Unknown start time") scans the clock offset over ±S s, then
