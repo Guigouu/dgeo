@@ -186,7 +186,8 @@ with st.sidebar.expander("Physical parameters", expanded=False):
     st.caption("Loaded DEMs: " + (", ".join(p.name for p in DEMS.glob('*.tif')) or "none (constant elevation)"))
 
 st.title(f"Session: {cur}")
-tabs = st.tabs(["① ADS-B", "② Audio", "③ Detection", "④ Overlay (known position)", "⑤ Search"])
+tabs = st.tabs([":material/flight: ADS-B", ":material/graphic_eq: Audio", ":material/timeline: Detection",
+                ":material/stacked_line_chart: Overlay (known position)", ":material/travel_explore: Search"])
 
 # ---------------------------------------------------------------- 1. ADS-B
 with tabs[0]:
@@ -199,7 +200,7 @@ with tabs[0]:
                         help="both: alternates adsb.lol / airplanes.live, each within its own rate limit")
     running = capture_running(cur)
     b1, b2 = st.columns(2)
-    if b1.button("▶ Start capture", disabled=running, type="primary"):
+    if b1.button("Start capture", icon=":material/play_arrow:", disabled=running, type="primary"):
         save_meta(S, center_lat=lat_c, center_lon=lon_c)
         log = open(S / "adsb_live.log", "a")
         procs()[cur] = subprocess.Popen(
@@ -207,12 +208,12 @@ with tabs[0]:
              "--radius-nm", str(rad), "--provider", prov, "--out", str(S / "flights.csv")],
             stdout=log, stderr=log, cwd=str(Path(__file__).resolve().parents[1]))
         st.rerun()
-    if b2.button("■ Stop", disabled=not running):
+    if b2.button("Stop", icon=":material/stop:", disabled=not running):
         procs()[cur].send_signal(signal.SIGINT)
         procs()[cur].wait(timeout=10)
         st.rerun()
     st.write("Capture running ✅" if running else "Capture stopped")
-    if st.button("↻ Refresh"):
+    if st.button("Refresh", icon=":material/refresh:"):
         st.rerun()
     up = st.file_uploader("…or import a flights.csv (CLI capture / adsb-hist)", type=["csv"])
     if up:
@@ -300,7 +301,7 @@ with tabs[1]:
         cur_k = M.get("t0_hyp_choice") if M.get("t0_hyp_choice") in keys else keys[0]
         st.info(f"Start time **pre-filled from the file metadata** "
                 f"(reason for the choice: {M.get('t0_hyp_reason')}). Allow ±5 s of clock uncertainty "
-                f"in ④ and ⑤; a spoken time mark remains more reliable.")
+                f"in the Overlay and Search tabs; a spoken time mark remains more reliable.")
         k = st.radio("The creation_time metadata corresponds to…", keys, index=keys.index(cur_k),
                      format_func=fmt_h, horizontal=True)
         if k != cur_k:
@@ -309,7 +310,7 @@ with tabs[1]:
     elif M.get("audio_name") and not M.get("t0"):
         st.warning("No usable time found in the file: enter the start time.")
     if M.get("audio_creation_tag") and not str(M.get("t0_source", "")).startswith("metadata"):
-        if st.button("↺ Use the file metadata for the start time"):
+        if st.button("Use the file metadata for the start time", icon=":material/restore:"):
             guess_from_meta()
             st.rerun()
     t0_cur = M.get("t0")
@@ -343,7 +344,7 @@ with tabs[1]:
 # ---------------------------------------------------------------- 3. Detection
 with tabs[2]:
     if not (S / "rec.wav").exists():
-        st.warning("Import an audio file first (tab ②).")
+        st.warning("Import an audio file first (Audio tab).")
     else:
         c1, c2, c3, c4 = st.columns(4)
         thr = c1.number_input("Threshold (σ)", value=2.5, step=0.25)
@@ -377,7 +378,7 @@ with tabs[3]:
                 "should line up with the curves in the spectrogram.")
     ok = (S / "rec.wav").exists() and (S / "flights.csv").exists() and M.get("t0")
     if not ok:
-        st.warning("Required: flights.csv (①), rec.wav and start time (②).")
+        st.warning("Required: flights.csv (ADS-B tab), audio and start time (Audio tab).")
     else:
         c1, c2, c3, c4 = st.columns(4)
         klat = c1.number_input("Known latitude", value=float(M.get("known_lat", M.get("center_lat", 0.0))), format="%.6f")
@@ -412,7 +413,7 @@ with tabs[4]:
     st.markdown("**Phase 2** — search for the position from the tracks, the ADS-B data and the start time.")
     ok = (S / "tracks.csv").exists() and (S / "flights.csv").exists() and M.get("t0")
     if not ok:
-        st.warning("Required: flights.csv (①), start time (②), tracks (③).")
+        st.warning("Required: flights.csv (ADS-B tab), start time (Audio tab), tracks (Detection tab).")
     else:
         c1, c2, c3 = st.columns(3)
         slat = c1.number_input("Search centre latitude", value=float(M.get("center_lat", 0.0)), format="%.5f")
@@ -445,7 +446,7 @@ with tabs[4]:
             if M.get("truth"):
                 ref_pts.append(("Ground truth (demo)", M["truth"]["lat"], M["truth"]["lon"]))
             elif M.get("known_lat") is not None:
-                ref_pts.append(("Known position (tab ④)", M["known_lat"], M["known_lon"]))
+                ref_pts.append(("Known position (Overlay tab)", M["known_lat"], M["known_lon"]))
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("Best point", f"{b.lat:.4f}, {b.lon:.4f}", help=f"{b.lat:.6f}, {b.lon:.6f}")
             c2.metric("Cost (cumulative rms %)", f"{b.cost:.2f}")

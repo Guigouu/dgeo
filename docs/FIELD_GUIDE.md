@@ -53,15 +53,15 @@ UTC, to within ~2 s. The app pre-fills the start time from it and lets you flip 
 
 1. `make up`, open http://localhost:8501, create a session. In the sidebar, set the ground elevation
    (or upload a DEM tile), the geoid undulation, QNH and temperature for your area.
-2. Tab ①: centre = your approximate area, radius 15 NM, **Start capture**.
+2. **ADS-B** tab: centre = your approximate area, radius 15 NM, **Start capture**.
 3. Record 15–30 min (with the "mark").
 4. Let the capture run 2–3 more minutes, then **Stop**.
-5. Tab ②: import the audio, check the start time (time zone!), look at the spectrogram
+5. **Audio** tab: import the audio, check the start time (time zone!), look at the spectrogram
    (50–1500 Hz: look for descending "S" curves).
-6. Tab ③: detection. If nothing: lower the threshold or widen the f0 range.
-7. Tab ④ (optional): overlay at your real position. **This is the phase-1 test**: the coloured
+6. **Detection** tab: detection. If nothing: lower the threshold or widen the f0 range.
+7. **Overlay** tab (optional): overlay at your real position. **This is the phase-1 test**: the coloured
    curves must land on the cyan tracks.
-8. Tab ⑤: search, radius 5 km, then 10, then 20. Compare with your real position.
+8. **Search** tab: search, radius 5 km, then 10, then 20. Compare with your real position.
 
 ## Supporting data
 
@@ -94,7 +94,7 @@ UTC, to within ~2 s. The app pre-fills the start time from it and lets you flip 
 
 | Symptom | Likely cause | Action |
 |---|---|---|
-| No track detected | Weak signal, phone processing, mostly broadband jets | Lower threshold, longer recording, lossless audio; check tab ④ |
+| No track detected | Weak signal, phone processing, mostly broadband jets | Lower threshold, longer recording, lossless audio; check the **Overlay** tab |
 | Overlay consistently shifted in time | Wrong start time | Increase the clock uncertainty, use the "mark" |
 | Predicted curves too steep / too flat | Wrong altitude or distance | Check QNH, `--alt-source`, ground elevation / DEM, microphone height |
 | Right shape, wrong frequency | Normal: f0 is free | — |
