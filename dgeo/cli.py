@@ -8,6 +8,8 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .timeguess import parse_iso
+
 import numpy as np
 
 
@@ -15,7 +17,7 @@ def parse_time(s: str) -> float:
     try:
         return float(s)
     except ValueError:
-        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        dt = parse_iso(s)
         if dt.tzinfo is None:
             raise SystemExit(f"--t0 '{s}': specify the time zone (e.g. 2025-06-01T12:00:00+02:00 or ...Z)")
         return dt.timestamp()

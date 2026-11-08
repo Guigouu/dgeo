@@ -64,7 +64,7 @@ synthetic position within a few tens of metres.
 Other targets: `make test` (pytest in the container), `make demo` (CLI demo, outputs in `./data/demo`),
 `make logs`, `make down`. Data persists in `./data` (mounted at `/data`).
 
-Without Docker:
+Without Docker (Python ≥ 3.10):
 
 ```bash
 python -m venv .venv && . .venv/bin/activate

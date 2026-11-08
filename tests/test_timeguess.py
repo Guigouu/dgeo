@@ -25,3 +25,13 @@ def test_default_and_missing():
     assert guess_start(CT, DUR, CT + 10 * 3600)["choice"] == "fin"
     assert guess_start(None, DUR, CT)["choice"] is None
     assert parse_creation("2025-06-01 12:00:00") is None  # no time zone
+
+
+def test_iso_parsing_is_version_independent():
+    """Python 3.10's fromisoformat only accepts 3 or 6 fractional digits and no 'Z' suffix."""
+    from dgeo.timeguess import parse_clock, parse_iso
+
+    assert parse_iso("2025-06-01T11:04:53.34Z").timestamp() == parse_creation("2025-06-01T11:04:53.340000+00:00")
+    assert parse_iso("2025-06-01T11:04:53.1234567Z").microsecond == 123456
+    assert parse_clock("10:15:03.5").microsecond == 500000
+    assert parse_clock("10:15").minute == 15

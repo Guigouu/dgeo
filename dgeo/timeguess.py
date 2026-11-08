@@ -18,8 +18,9 @@ The metadata is rounded to the second: keep +/-5 s of clock uncertainty downstre
 from __future__ import annotations
 
 import json
+import re
 import subprocess
-from datetime import datetime
+from datetime import datetime, time as dtime
 
 
 def probe(path: str) -> tuple[float | None, str | None]:
@@ -35,11 +36,33 @@ def probe(path: str) -> tuple[float | None, str | None]:
     return dur, tags.get("creation_time") or tags.get("date")
 
 
+_FRACTION = re.compile(r"(\d{2}:\d{2}:\d{2})\.(\d+)")
+
+
+def _norm_fraction(s: str) -> str:
+    """Pad/truncate fractional seconds to 6 digits: Python 3.10's fromisoformat only accepts 3 or 6."""
+    return _FRACTION.sub(lambda m: f"{m.group(1)}.{(m.group(2) + '000000')[:6]}", s)
+
+
+def parse_iso(s: str) -> datetime:
+    """ISO 8601 date-time parser that behaves the same on Python 3.10+ ('Z' suffix, any number of
+    fractional digits). Raises ValueError on invalid input."""
+    s = s.strip()
+    if s.endswith(("Z", "z")):
+        s = s[:-1] + "+00:00"
+    return datetime.fromisoformat(_norm_fraction(s))
+
+
+def parse_clock(s: str) -> dtime:
+    """HH:MM[:SS[.f…]] -> datetime.time, same behaviour on Python 3.10+."""
+    return dtime.fromisoformat(_norm_fraction(s.strip()))
+
+
 def parse_creation(s: str | None) -> float | None:
     if not s:
         return None
     try:
-        dt = datetime.fromisoformat(s.strip().replace("Z", "+00:00"))
+        dt = parse_iso(s)
     except ValueError:
         return None
     if dt.tzinfo is None:

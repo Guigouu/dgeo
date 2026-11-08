@@ -8,4 +8,5 @@
 - Live ADS-B capture (adsb.lol, airplanes.live) with adaptive rate limiting; reader for adsb.lol `globe_history` dumps.
 - Start time pre-filled from audio file metadata (start/end hypotheses).
 - Streamlit UI (5 tabs, map with cost classes and toggleable layers), CLI, Docker image.
-- Synthetic benchmark and tests.
+- Synthetic benchmark and tests; CI on Python 3.10 and 3.12 plus a Docker build.
+- Date/time parsing that behaves identically on Python 3.10+ (fractional seconds, `Z` suffix).

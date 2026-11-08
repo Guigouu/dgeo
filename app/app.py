@@ -31,7 +31,7 @@ from dgeo.doppler import build_trajectories  # noqa: E402
 from dgeo.geo import Dem, LocalFrame, speed_of_sound  # noqa: E402
 from dgeo.plots import heatmap_fig, overlay_fig, spectro_fig  # noqa: E402
 from dgeo.search import SearchConfig, observers, overlay_curves, search  # noqa: E402
-from dgeo.timeguess import guess_start, parse_creation, probe  # noqa: E402
+from dgeo.timeguess import guess_start, parse_clock, parse_creation, probe  # noqa: E402
 
 DATA = Path(os.environ.get("DGEO_DATA", "./data"))
 SESS = DATA / "sessions"
@@ -322,7 +322,7 @@ with tabs[1]:
     h_in = c2.text_input("Start time (HH:MM:SS[.s])", h_def.strftime("%H:%M:%S"))
     if st.button("Save start time"):
         try:
-            hh = dtime.fromisoformat(h_in)
+            hh = parse_clock(h_in)
             t0 = datetime.combine(d_in, hh, ZoneInfo(tz_name)).timestamp()
             save_meta(S, t0=t0, t0_source="manual")
             st.success(f"t0 = {datetime.fromtimestamp(t0, timezone.utc):%Y-%m-%d %H:%M:%S.%f} UTC")
