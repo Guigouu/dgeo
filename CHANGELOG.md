@@ -1,7 +1,6 @@
 # Changelog
 
-## Unreleased
-
+## 0.2.0 — 2026-11-08
 - Experimental loudness-event term: broadband passes (mostly jets) are detected as level peaks and matched
   to predicted heard CPAs with a shared fitted lag, filtered by ADS-B emitter category (`--events`,
   "Use loudness events" in the Search tab). Off by default.
