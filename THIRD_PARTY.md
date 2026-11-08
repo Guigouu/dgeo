@@ -36,6 +36,14 @@ below and must respect their terms.
   second (see <https://airplanes.live/api-guide>). dgeo queries it at most every ~3 s and disables it
   automatically if access is refused.
 
+### Geocoding
+
+- **OpenStreetMap Nominatim** (https://nominatim.org) — used only when you type an address in the ADS-B tab
+  or run `dgeo geocode`; coordinates typed as `lat, lon` are parsed locally. Data © OpenStreetMap
+  contributors, ODbL 1.0. Subject to the Nominatim usage policy
+  (https://operations.osmfoundation.org/policies/nominatim/): occasional single queries, identified
+  User-Agent, no bulk geocoding. The query text is sent to the OSM Foundation's servers.
+
 ### Elevation
 
 - **Copernicus DEM GLO-30** — free licence from the European Union / ESA. Products derived from it

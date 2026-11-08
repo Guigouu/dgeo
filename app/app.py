@@ -29,6 +29,7 @@ from dgeo.cli import haversine  # noqa: E402
 from dgeo.detect import detect, from_frame, to_frame  # noqa: E402
 from dgeo.doppler import build_trajectories  # noqa: E402
 from dgeo.geo import Dem, LocalFrame, speed_of_sound, wind_vector  # noqa: E402
+from dgeo.geocode import geocode  # noqa: E402
 from dgeo.plots import heatmap_fig, overlay_fig, spectro_fig  # noqa: E402
 from dgeo.events import detect_events as detect_loudness, from_frame as events_from_frame  # noqa: E402
 from dgeo.events import to_frame as events_frame  # noqa: E402
@@ -97,6 +98,37 @@ def save_meta(s: Path, **kw):
         return  # nothing changes: don't write (avoids a write on every rerun)
     m.update(kw)
     _write_meta(s, m)
+
+
+def place_picker(S: Path, key: str, lat_key: str, lon_key: str, label: str):
+    """Address or "lat, lon" -> sets meta[lat_key], meta[lon_key]. Coordinates are parsed locally; an address
+    is looked up with OpenStreetMap Nominatim (the text is sent to it)."""
+    f1, f2 = st.columns([4, 1], vertical_alignment="bottom")
+    q = f1.text_input(label, key=f"{key}_q", placeholder="Puerta del Sol, Madrid   —   or   40.41694, -3.70357",
+                      help="Paste coordinates (copied from Google Maps / OSM) or type an address / place name. "
+                           "Coordinates stay on your machine; an address is sent to OpenStreetMap Nominatim, "
+                           "so prefer a nearby public place to your exact home address.")
+    if f2.button("Find", key=f"{key}_go", icon=":material/search:") and q.strip():
+        try:
+            st.session_state[f"{key}_res"] = geocode(q)
+        except Exception as e:  # network error, rate limit...
+            st.session_state[f"{key}_res"] = []
+            st.error(f"Geocoding failed: {e}")
+        res = st.session_state[f"{key}_res"]
+        if not res:
+            st.warning("No match. Try a simpler query (street + city) or paste coordinates.")
+        elif len(res) == 1:
+            save_meta(S, **{lat_key: round(res[0].lat, 6), lon_key: round(res[0].lon, 6)})
+            st.session_state.pop(f"{key}_res")
+            st.rerun()
+    res = st.session_state.get(f"{key}_res") or []
+    if len(res) > 1:
+        g1, g2 = st.columns([4, 1], vertical_alignment="bottom")
+        i = g1.selectbox("Matches", range(len(res)), format_func=lambda k: res[k].name, key=f"{key}_pick")
+        if g2.button("Use", key=f"{key}_use", icon=":material/check:"):
+            save_meta(S, **{lat_key: round(res[i].lat, 6), lon_key: round(res[i].lon, 6)})
+            st.session_state.pop(f"{key}_res")
+            st.rerun()
 
 
 def capture_running(name: str) -> bool:
@@ -210,6 +242,8 @@ tabs = st.tabs([":material/flight: ADS-B", ":material/graphic_eq: Audio", ":mate
 # ---------------------------------------------------------------- 1. ADS-B
 with tabs[0]:
     st.markdown("Start the capture **before** you start recording audio, and stop it a few minutes after.")
+    place_picker(S, "adsb_place", "center_lat", "center_lon", "Centre: address or coordinates")
+    M = load_meta(S)
     c1, c2, c3, c4 = st.columns(4)
     lat_c = c1.number_input("Centre latitude", value=float(M.get("center_lat", 0.0)), format="%.5f")
     lon_c = c2.number_input("Centre longitude", value=float(M.get("center_lon", 0.0)), format="%.5f")
@@ -217,8 +251,12 @@ with tabs[0]:
     prov = c4.selectbox("Provider", ["both", "adsblol", "airplaneslive"],
                         help="both: alternates adsb.lol / airplanes.live, each within its own rate limit")
     running = capture_running(cur)
+    no_centre = lat_c == 0.0 and lon_c == 0.0
+    if no_centre and not running:
+        st.info("Set the centre first (address or coordinates above): the capture keeps only aircraft within "
+                "the radius of this point.")
     b1, b2 = st.columns(2)
-    if b1.button("Start capture", icon=":material/play_arrow:", disabled=running, type="primary"):
+    if b1.button("Start capture", icon=":material/play_arrow:", disabled=running or no_centre, type="primary"):
         save_meta(S, center_lat=lat_c, center_lon=lon_c)
         log = open(S / "adsb_live.log", "a")
         procs()[cur] = subprocess.Popen(

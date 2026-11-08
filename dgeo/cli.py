@@ -175,6 +175,16 @@ def cmd_search(a):
     print(f"-> {out}/candidates.csv, top50.geojson, heatmap.png")
 
 
+def cmd_geocode(a):
+    from .geocode import geocode
+
+    res = geocode(" ".join(a.query))
+    if not res:
+        raise SystemExit("no match")
+    for r in res:
+        print(f"{r.lat:.6f} {r.lon:.6f}  {r.name}")
+
+
 def cmd_merge(a):
     """Costs are absolute (same tracks, same ADS-B, same parameters), so searches run separately on
     adjacent tiles can be merged by sorting. Different centres give different e/n frames: keep lat/lon."""
@@ -363,6 +373,10 @@ def build_parser():
     s.add_argument("--truth", help="truth.json (to compute the position error)")
     s.add_argument("--out-dir", default="out")
     s.set_defaults(fn=cmd_search)
+
+    s = sub.add_parser("geocode", help="address or place name -> lat lon (OpenStreetMap Nominatim)")
+    s.add_argument("query", nargs="+", help='address, place name, or "lat, lon"')
+    s.set_defaults(fn=cmd_geocode)
 
     s = sub.add_parser("merge", help="merge candidates.csv files of searches run on separate tiles / machines")
     s.add_argument("inputs", nargs="+", help="candidates.csv files")

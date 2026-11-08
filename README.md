@@ -86,7 +86,7 @@ make local-ui
 
 | Tab | Purpose |
 |---|---|
-| ADS-B | Start/stop a live capture (adsb.lol and/or airplanes.live) inside the container, or import a `flights.csv`. |
+| ADS-B | Set the centre from an address or pasted coordinates, start/stop a live capture (adsb.lol and/or airplanes.live) inside the container, or import a `flights.csv`. |
 | Audio | Import (wav/m4a/mp3/… converted with ffmpeg), start time (pre-filled from file metadata), spectrogram. |
 | Detection | Automatic track extraction + fit (f0, speed, CPA distance). Hand-traced tracks can be imported as CSV. |
 | Overlay | **Phase 1** (optional): at a known position, predicted curves over the spectrogram + estimated clock offset. |
@@ -101,6 +101,8 @@ metres in heights distorts the predicted curves.
 Everything the UI does is available from the CLI (`dgeo <command> --help`, or `python -m dgeo`):
 
 ```bash
+dgeo geocode "Puerta del Sol, Madrid"     # -> lat lon (OpenStreetMap Nominatim; coordinates are parsed locally)
+
 # while recording (Ctrl-C to stop)
 dgeo adsb-live --lat <lat> --lon <lon> --radius-nm 15 --out flights.csv
 
