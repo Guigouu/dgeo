@@ -24,6 +24,8 @@ jobs:
           cache: pip
       - name: Install
         run: pip install -e ".[ui,dem,dev]"
+      - name: Version consistency
+        run: python scripts/check_version.py
       - name: Tests
         run: pytest -q
       - name: Synthetic end-to-end demo

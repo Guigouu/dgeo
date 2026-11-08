@@ -171,6 +171,15 @@ curve stands out. The clock offset `dt` is swept globally. This produces the plo
 
 - **Wind** is modelled as a single uniform vector (surface METAR); a vertical profile would be better for high passes.
 - **Jets** are mostly broadband: see the experimental loudness-event term (§6b).
+- **Ground reflection (Lloyd's mirror)** is another way to exploit broadband jets: the direct and
+  ground-reflected paths interfere, and the cepstral delay `τ ≈ 2·h·sin θ / c` (h = microphone height,
+  θ = source elevation) traces the pass geometry (Lo & Ferguson, IEEE TAES 2002–2003; implemented in
+  [hermes-aircraft-doppler-geolocation](https://github.com/mojomast/hermes-aircraft-doppler-geolocation),
+  `docs/broadband.md`). It was **not adopted**: tested on a 90-minute urban phone recording (microphone on a
+  first-floor balcony, AAC, jets 5–7 km away at 3–5 km altitude), neither a cepstral search along the delays
+  predicted from ADS-B (microphone heights 2–15 m) nor that project's own detector found any fringe track.
+  The method needs close passes over hard, open ground and lossless audio; it is worth revisiting with such
+  recordings.
 - **Unknown recording time** over hours: pre-filter flights with the fitted (v, d) of each track before the
   scan (not implemented).
 - Score the N best candidates in energy mode too (faint tracks that were not detected).

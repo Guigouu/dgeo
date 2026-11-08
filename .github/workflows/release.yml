@@ -1,47 +1,74 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# Push a tag "vX.Y.Z" matching pyproject.toml's version to publish:
-#   - a GitHub Release with the CHANGELOG section, the wheel and the sdist;
-#   - the Docker image ghcr.io/<owner>/dgeo:X.Y.Z and :latest.
+# Automatic releases. On every push to main, if the version in pyproject.toml has no "vX.Y.Z" tag yet:
+#   tests + demo -> wheel/sdist -> Docker image ghcr.io/<owner>/dgeo:X.Y.Z and :latest
+#   -> tag vX.Y.Z + GitHub Release (CHANGELOG section, wheel, sdist, SHA256SUMS).
+# To release: open a PR that bumps the version (scripts/bump_version.py) and fills CHANGELOG.md, merge it.
 name: Release
 
 on:
   push:
-    tags: ["v*"]
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: write
   packages: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   release:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
-      - name: Check that the tag matches the package version
+      - name: Is this version already released?
+        id: v
         run: |
           v=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
-          if [ "v$v" != "$GITHUB_REF_NAME" ]; then echo "::error::tag $GITHUB_REF_NAME != version $v"; exit 1; fi
-          echo "VERSION=$v" >> "$GITHUB_ENV"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          if git rev-parse -q --verify "refs/tags/v$v" >/dev/null; then
+            echo "v$v is already released: nothing to do."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "v$v is not released yet: releasing."
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Test
+        if: steps.v.outputs.release == 'true'
         run: |
+          python scripts/check_version.py
           pip install -e ".[ui,dem,dev]" build
           pytest -q
           dgeo demo --out-dir demo
 
       - name: Build wheel and sdist
-        run: python -m build
+        if: steps.v.outputs.release == 'true'
+        run: |
+          python -m build
+          (cd dist && sha256sum * > SHA256SUMS)
 
       - name: Release notes from CHANGELOG
+        if: steps.v.outputs.release == 'true'
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
         run: |
-          awk -v v="$VERSION" '/^## /{p = index($0, v) > 0; next} p' CHANGELOG.md > notes.md
-          test -s notes.md || echo "See CHANGELOG.md" > notes.md
+          awk -v v="$VERSION" '/^## /{p = ($2 == v); next} p' CHANGELOG.md > notes.md
+          test -s notes.md
 
-      - name: Build and push the Docker image
+      - name: Build, test and push the Docker image
+        if: steps.v.outputs.release == 'true'
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
         run: |
           image="ghcr.io/${GITHUB_REPOSITORY,,}"
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
@@ -50,9 +77,11 @@ jobs:
           docker push "$image:$VERSION"
           docker push "$image:latest"
 
-      - name: Create the GitHub Release
+      - name: Tag and publish the GitHub Release
+        if: steps.v.outputs.release == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.v.outputs.version }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/* \
-            --title "dgeo $VERSION" --notes-file notes.md --verify-tag
+          gh release create "v$VERSION" dist/* --target "$GITHUB_SHA" \
+            --title "dgeo $VERSION" --notes-file notes.md
