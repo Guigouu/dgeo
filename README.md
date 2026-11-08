@@ -157,10 +157,15 @@ tests/          physics, metadata timing, end to end
 
 ## Releases
 
-Versions follow [semantic versioning](https://semver.org/) (0.x: anything may change). To release,
-bump `version` in `pyproject.toml` and `dgeo/__init__.py`, add a section to `CHANGELOG.md`, then push a
-tag `vX.Y.Z`: the release workflow tests, builds the wheel and the Docker image
-(`ghcr.io/guigouu/dgeo`), and publishes the GitHub Release.
+Versions follow [semantic versioning](https://semver.org/) (0.x: anything may change). Releases are
+automatic: when `main` contains a version with no `vX.Y.Z` tag yet, the release workflow runs the tests,
+builds the wheel and the Docker image (`ghcr.io/guigouu/dgeo`), creates the tag and publishes the
+GitHub Release with the matching `CHANGELOG.md` section. To release:
+
+```bash
+python scripts/bump_version.py 0.2.0   # bumps pyproject.toml + dgeo/__init__.py, adds a CHANGELOG section
+# fill in CHANGELOG.md, open a PR, merge it -> release published
+```
 
 ## Contributing
 
