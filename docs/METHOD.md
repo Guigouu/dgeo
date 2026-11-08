@@ -86,6 +86,35 @@ cost   = RMS_k( ln f_k − ln r_k − ln f0* ) × 100 (≈ % frequency error)
 Optimisation: the physics is computed once on a regular time grid covering the track ±dt, then
 interpolated for each `(dt, t_k)`. Flights whose CPA is beyond `max_range_m` are ignored.
 
+## 6b. Loudness events (experimental)
+
+Many passes, especially jets a few km away, produce no usable tone, only a broad hump of energy.
+`dgeo/events.py` detects them as peaks of the 150–1500 Hz level above the per-frequency background
+(6 s smoothing, prominence ≥ 4 dB, width 10–240 s), excluding the spans already covered by tonal tracks.
+
+In the search, each event is matched to the flight whose predicted heard CPA is closest, with:
+
+- a **lag** `loudness peak − heard CPA` shared by all events and fitted per grid point
+  (−25…+10 s): directivity and absorption shift the peak, in field data it led the CPA by 10–20 s;
+- a timing tolerance `event_sigma_s` = 6 s and a capped squared residual (unmatched event = cap);
+- a **category filter**: only large aircraft (ADS-B emitter categories A2–A6) can explain an event up to
+  9 km; light aircraft, rotorcraft and unknown categories only up to 2.5 km. Without it, distant light
+  aircraft were matched by chance and pulled the solution away;
+- a low weight (`event_weight` = 0.25): events alone are not reliable (dense traffic gives chance matches),
+  they only refine a solution anchored by tonal tracks.
+
+Observed effect: on a synthetic scenario with one tonal track and four broadband jets, the error drops from
+125 m to 48 m; on one 90-minute urban field recording with a single tonal pass, the candidate area
+(cost ≤ min + 0.1) shrank from 8.2 to 2.0 km² with the true position still inside, while higher weights
+excluded it. One recording is not an evaluation: the term is **off by default**.
+
+## Candidate area
+
+Besides the best point, the search reports the area of the coarse-grid points whose cost is within 0.1 and
+0.3 of the minimum, and how far they extend from the best point. A large area means a plateau: the
+recording does not pin the position down, whatever the best point says. This is a descriptive measure,
+not a calibrated confidence region.
+
 ## 7. Search
 
 1. Coarse grid (250 m) over a disc of radius R.

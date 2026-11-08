@@ -83,6 +83,12 @@ def cmd_detect(a):
     c = speed_of_sound(a.temp_c)
     tr = detect(sp, c, fmin=a.fmin, fmax=a.fmax, thr=a.thr, min_dur_s=a.min_dur)
     to_frame(tr).to_csv(a.out, index=False)
+    from .events import detect_events, to_frame as events_frame
+
+    ev = detect_events(sp, exclude=[(t.t[0], t.t[-1]) for t in tr])
+    ev_out = Path(a.events_out) if a.events_out else Path(a.out).with_name("events.csv")
+    events_frame(ev).to_csv(ev_out, index=False)
+    print(f"  loudness events (broadband, outside tracks): {[round(e.t) for e in ev]} -> {ev_out}")
     fits = [{"track": t.id, "t_start": float(t.t[0]), "t_end": float(t.t[-1]), **t.fit} for t in tr]
     Path(a.out).with_suffix(".fit.json").write_text(json.dumps(fits, indent=2))
     for f in fits:
@@ -129,7 +135,12 @@ def cmd_search(a):
 
     frame, dem, c = _env(a)
     trajs = _trajs(a, frame)
-    tracks = from_frame(pd.read_csv(a.tracks))
+    tracks = from_frame(pd.read_csv(a.tracks)) if a.tracks else []
+    events = []
+    if a.events:
+        from .events import from_frame as events_from_frame
+
+        events = events_from_frame(pd.read_csv(a.events))
     dur = a.duration
     if dur is None:
         if not a.wav:
@@ -138,16 +149,17 @@ def cmd_search(a):
         x, fs = load_wav(a.wav, 8000)
         dur = len(x) / fs
     cfg = SearchConfig(radius_km=a.radius_km, coarse_m=a.coarse, fine_m=a.fine, dt_max=a.dt_max,
-                       max_range_m=a.max_range, audible_m=a.audible, obs_agl=a.obs_agl)
+                       max_range_m=a.max_range, audible_m=a.audible, obs_agl=a.obs_agl,
+                       event_weight=a.event_weight)
     df = search(tracks, trajs, frame, dem, parse_time(a.t0), dur, c, cfg,
-                log=lambda m: print(m, file=sys.stderr))
+                log=lambda m: print(m, file=sys.stderr), events=events)
     out = Path(a.out_dir)
     out.mkdir(parents=True, exist_ok=True)
     df.to_csv(out / "candidates.csv", index=False)
     _geojson(df.head(50), out / "top50.geojson")
     truth = json.loads(Path(a.truth).read_text()) if a.truth else None
     heatmap_fig(df, truth, out=out / "heatmap.png", title="cost per grid point (track mode)")
-    _report(df, truth)
+    _report(df, truth, coarse_m=a.coarse)
     print(f"-> {out}/candidates.csv, top50.geojson, heatmap.png")
 
 
@@ -164,8 +176,10 @@ def haversine(lat1, lon1, lat2, lon2):
     return 2 * 6371000 * np.arcsin(np.sqrt(a))
 
 
-def _report(df, truth=None):
-    trk_cols = [c[:-7] for c in df.columns if c.endswith("_flight")]
+def _report(df, truth=None, coarse_m: float = 250.0):
+    from .search import candidate_area
+
+    trk_cols = [c[:-7] for c in df.columns if c.endswith("_flight") and c.startswith("trk")]
     print("\n rank   lat        lon        cost   dt    silences  matched flights")
     for i, r in enumerate(df.head(5).itertuples()):
         fl = ", ".join(str(getattr(r, f"{k}_flight")) for k in trk_cols)
@@ -176,6 +190,11 @@ def _report(df, truth=None):
         f = far.iloc[0]
         print(f"\n 2nd distinct zone (>300 m): cost {f.cost:.2f} at {haversine(f.lat, f.lon, b.lat, b.lon):.0f} m "
               f"-> margin {f.cost - b.cost:.2f} (ratio {f.cost / max(b.cost, 1e-6):.1f}x)")
+    for d, (area, radius) in candidate_area(df, coarse_m).items():
+        print(f" candidate area (cost <= min + {d}): {area:.2f} km², up to {radius:.0f} m from the best point")
+    if "event_lag" in df.columns and any(c.startswith("ev") and c.endswith("_flight") for c in df.columns):
+        evs = [str(b[c]) or "-" for c in df.columns if c.startswith("ev") and c.endswith("_flight")]
+        print(f" loudness events: lag {b.event_lag:+.0f} s, matched: {', '.join(evs)}")
     if truth:
         e = haversine(df.lat.iloc[0], df.lon.iloc[0], truth["lat"], truth["lon"])
         print(f" ERROR vs ground truth: {e:.0f} m")
@@ -185,7 +204,7 @@ def _report(df, truth=None):
 def cmd_synth(a):
     from .synth import make
 
-    t = make(a.out_dir, seed=a.seed)
+    t = make(a.out_dir, seed=a.seed, broadband_jets=a.broadband_jets)
     print(json.dumps(t, indent=2))
 
 
@@ -269,6 +288,7 @@ def build_parser():
     s.add_argument("--min-dur", type=float, default=15.0, help="minimum track duration (s)")
     s.add_argument("--temp-c", type=float, default=15.0)
     s.add_argument("--out", default="tracks.csv")
+    s.add_argument("--events-out", help="loudness events CSV (default: events.csv next to --out)")
     s.add_argument("--png")
     s.set_defaults(fn=cmd_detect)
 
@@ -287,7 +307,9 @@ def build_parser():
     geo_args(s, "centre of the search area")
     s.add_argument("--wav", help="(used for the duration if --duration is not given)")
     s.add_argument("--duration", type=float)
-    s.add_argument("--tracks", required=True)
+    s.add_argument("--tracks", help="tonal tracks CSV (from detect)")
+    s.add_argument("--events", help="loudness events CSV (from detect) — EXPERIMENTAL, see docs/METHOD.md")
+    s.add_argument("--event-weight", type=float, default=0.25, help="weight of the loudness-event term")
     s.add_argument("--flights", required=True)
     s.add_argument("--t0", required=True)
     s.add_argument("--radius-km", type=float, default=10)
@@ -303,6 +325,7 @@ def build_parser():
     s = sub.add_parser("synth", help="generate a synthetic scenario")
     s.add_argument("--out-dir", default="synth")
     s.add_argument("--seed", type=int, default=1)
+    s.add_argument("--broadband-jets", action="store_true", help="add jets rendered as broadband noise (600 s)")
     s.set_defaults(fn=cmd_synth)
 
     s = sub.add_parser("demo", help="end-to-end synthetic scenario")
