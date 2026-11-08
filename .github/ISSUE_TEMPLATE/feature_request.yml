@@ -1,0 +1,24 @@
+name: Feature request
+description: Suggest an improvement to the method, the UI or the tooling
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or motivation
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: For changes to the physics or scoring, explain how it can be validated on the synthetic benchmark.
+    validations:
+      required: true
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope
+      options:
+        - label: This request is compatible with the educational / research purpose of the project (no feature aimed at locating or tracking people without consent).
+          required: true

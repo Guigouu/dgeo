@@ -12,6 +12,13 @@ pytest -q
 
 `ffmpeg` must be on your `PATH` to import non-WAV audio in the UI. `make local-ui` starts the app.
 
+## Workflow
+
+- Open an issue first for anything beyond a small fix, so the approach can be discussed.
+- Fork, branch, open a pull request against `main`; the CI (tests on Python 3.10 and 3.12, demo,
+  Docker build) must pass before merge. Pull requests are squash-merged.
+- Security issues: see [SECURITY.md](SECURITY.md), never in public issues.
+
 ## Guidelines
 
 - Keep the physics explicit and tested: any change to the forward model, detection or scoring should

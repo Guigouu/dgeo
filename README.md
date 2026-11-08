@@ -64,6 +64,12 @@ synthetic position within a few tens of metres.
 Other targets: `make test` (pytest in the container), `make demo` (CLI demo, outputs in `./data/demo`),
 `make logs`, `make down`. Data persists in `./data` (mounted at `/data`).
 
+Pre-built image (from the GitHub Releases):
+
+```bash
+docker run --rm -p 127.0.0.1:8501:8501 -v "$PWD/data:/data" ghcr.io/guigouu/dgeo:latest
+```
+
 Without Docker (Python ≥ 3.10):
 
 ```bash
@@ -148,6 +154,13 @@ tests/          physics, metadata timing, end to end
 - **Live ADS-B timing**: position time is reconstructed as `now − seen_pos` (~0.1–0.5 s).
 - **Phone processing** (noise suppression, AGC, lossy codecs) can remove faint tones.
 - A single pass only constrains the position to a ~2 km strip.
+
+## Releases
+
+Versions follow [semantic versioning](https://semver.org/) (0.x: anything may change). To release,
+bump `version` in `pyproject.toml` and `dgeo/__init__.py`, add a section to `CHANGELOG.md`, then push a
+tag `vX.Y.Z`: the release workflow tests, builds the wheel and the Docker image
+(`ghcr.io/guigouu/dgeo`), and publishes the GitHub Release.
 
 ## Contributing
 
