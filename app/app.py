@@ -30,7 +30,9 @@ from dgeo.detect import detect, from_frame, to_frame  # noqa: E402
 from dgeo.doppler import build_trajectories  # noqa: E402
 from dgeo.geo import Dem, LocalFrame, speed_of_sound  # noqa: E402
 from dgeo.plots import heatmap_fig, overlay_fig, spectro_fig  # noqa: E402
-from dgeo.search import SearchConfig, observers, overlay_curves, search  # noqa: E402
+from dgeo.events import detect_events as detect_loudness, from_frame as events_from_frame  # noqa: E402
+from dgeo.events import to_frame as events_frame  # noqa: E402
+from dgeo.search import SearchConfig, candidate_area, observers, overlay_curves, search  # noqa: E402
 from dgeo.timeguess import guess_start, parse_clock, parse_creation, probe  # noqa: E402
 
 DATA = Path(os.environ.get("DGEO_DATA", "./data"))
@@ -143,11 +145,15 @@ cur = st.sidebar.selectbox("Session", names, index=names.index(st.session_state[
 
 st.sidebar.divider()
 st.sidebar.subheader("Synthetic demo")
+bb_jets = st.sidebar.checkbox("Include broadband jets (600 s)", value=False,
+                              help="adds jets heard only as broadband noise, to try the loudness-event term")
 if st.sidebar.button("Generate a test scenario"):
     from dgeo.synth import make
 
     d = SESS / "demo-synth"
-    t = make(str(d))
+    for old in ("tracks.csv", "tracks.fit.json", "events.csv", "candidates.csv"):
+        (d / old).unlink(missing_ok=True)
+    t = make(str(d), broadband_jets=bb_jets)
     save_meta(d, t0=t["t0_reported"], center_lat=t["center"][0], center_lon=t["center"][1],
               known_lat=t["lat"], known_lon=t["lon"], ground_elev=t["ground_ortho_m"], geoid_n=t["geoid_n"],
               temp_c=t["temp_c"], truth={"lat": t["lat"], "lon": t["lon"]}, duration=t["duration_s"])
@@ -357,7 +363,9 @@ with tabs[2]:
                 tr = detect(sp, speed_of_sound(M.get("temp_c", 15.0)), fmin=fmin, fmax=fmax, thr=thr, min_dur_s=mind)
             to_frame(tr).to_csv(S / "tracks.csv", index=False)
             (S / "tracks.fit.json").write_text(json.dumps([{"piste": t.id, **t.fit} for t in tr], indent=2))
-            st.success(f"{len(tr)} track(s)")
+            ev = detect_loudness(sp, exclude=[(t.t[0], t.t[-1]) for t in tr])
+            events_frame(ev).to_csv(S / "events.csv", index=False)
+            st.success(f"{len(tr)} track(s), {len(ev)} loudness event(s)")
         up = st.file_uploader("…or import hand-drawn tracks (CSV: track,t,f)", type=["csv"])
         if up:
             (S / "tracks.csv").write_bytes(up.getbuffer())
@@ -370,7 +378,15 @@ with tabs[2]:
                                                       "t_cpa_heard": "CPA heard (s)",
                                                       "rms_pct": "rms (%)"}).round(2), hide_index=True)
             sp, _ = cached_spectro(str(S / "rec.wav"), (S / "rec.wav").stat().st_mtime, 1.0, 0.25)
-            show_fig(overlay_fig(sp, [], tr, 0, 1500, title="kept tracks (cyan)"))
+            fig = overlay_fig(sp, [], tr, 0, 1500, title="kept tracks (cyan), loudness events (dashed)")
+            if (S / "events.csv").exists():
+                evdf = pd.read_csv(S / "events.csv")
+                for te in evdf.t:
+                    fig.axes[0].axvline(te, color="white", ls="--", lw=0.8, alpha=0.7)
+                st.caption("Loudness events (broadband passes, mostly jets, outside the tonal tracks): "
+                           + (", ".join(f"{t:.0f} s ({p:.1f} dB)" for t, p in zip(evdf.t, evdf.prominence_db))
+                              or "none"))
+            show_fig(fig)
 
 # ---------------------------------------------------------------- 4. Overlay
 with tabs[3]:
@@ -425,16 +441,25 @@ with tabs[4]:
         dtm = c3.number_input("Clock uncertainty ± (s)", value=3.0)
         aud = c4.number_input("'Must be audible' distance (m)", value=2000)
         mrng = c5.number_input("Max range (m)", value=8000)
+        has_ev = (S / "events.csv").exists() and len(pd.read_csv(S / "events.csv")) > 0
+        e1, e2 = st.columns([2, 1])
+        use_ev = e1.checkbox("Use loudness events (experimental)", value=False, disabled=not has_ev,
+                             help="Also match the broadband loudness peaks (jets) to predicted passes, with one "
+                                  "lag shared by all events. Helps when there is a single tonal track; can mislead "
+                                  "with dense traffic. See docs/METHOD.md.")
+        ev_w = e2.number_input("Event weight", value=0.25, min_value=0.0, max_value=2.0, step=0.05,
+                               disabled=not use_ev)
         if st.button("Run search", type="primary"):
             frame, dem, c = env(M, slat, slon)
             trajs = trajs_for(S, M, frame)
             tracks = from_frame(pd.read_csv(S / "tracks.csv"))
             cfg = SearchConfig(radius_km=srad, coarse_m=coarse, fine_m=fine, dt_max=dtm, audible_m=aud,
-                               max_range_m=mrng, obs_agl=float(M.get("obs_agl", 1.5)))
+                               max_range_m=mrng, obs_agl=float(M.get("obs_agl", 1.5)), event_weight=ev_w)
+            events = events_from_frame(pd.read_csv(S / "events.csv")) if use_ev else []
             box = st.empty()
             with st.spinner("Grid search…"):
                 res = search(tracks, trajs, frame, dem, float(M["t0"]), float(M.get("duration", 300)), c, cfg,
-                             log=lambda msg: box.caption(msg))
+                             log=lambda msg: box.caption(msg), events=events)
             res.to_csv(S / "candidates.csv", index=False)
             save_meta(S, center_lat=slat, center_lon=slon, search_coarse_m=coarse, search_fine_m=fine)
             st.rerun()
@@ -457,6 +482,16 @@ with tabs[4]:
             if ref_pts:
                 name, rl, rn = ref_pts[0]
                 c4.metric(f"Error vs {name[:1].lower() + name[1:]}", f"{haversine(b.lat, b.lon, rl, rn):.0f} m")
+            area = candidate_area(res, float(M.get("search_coarse_m", 250)))
+            a1, a2, a3 = st.columns(3)
+            a1.metric("Candidate area (cost ≤ min + 0.1)", f"{area[0.1][0]:.2f} km²",
+                      help=f"up to {area[0.1][1]:.0f} m from the best point. Large = plateau: the recording "
+                           "does not pin the position down, whatever the best point says.")
+            a2.metric("Candidate area (cost ≤ min + 0.3)", f"{area[0.3][0]:.2f} km²",
+                      help=f"up to {area[0.3][1]:.0f} m from the best point")
+            if "event_lag" in res.columns and any(c.startswith("ev") and c.endswith("_flight") for c in res.columns):
+                a3.metric("Loudness events: lag", f"{b.event_lag:+.0f} s",
+                          help="loudness peak − heard CPA, shared by all events (fitted)")
 
             # ---- relative cost classes (cost / best cost) ----
             CLASSES = [  # (key, label, upper bound of the ratio, RGB colour)

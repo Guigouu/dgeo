@@ -35,7 +35,7 @@ the video's author.
 |---|---|---|
 | 0. Synthetic benchmark | Validate the pipeline end to end | ✅ 15–30 m error, clock offset recovered to ±0.25 s (`make test`) |
 | 1. Field test, known position | Predicted curves must overlay observed ones | ✅ A jet tone overlaid within ~2 s of clock offset |
-| 2. Search at known time | Recover one's own position | 🟡 Works with one pass, but the solution is a ~2 km plateau; needs several passes |
+| 2. Search at known time | Recover one's own position | 🟡 One tonal pass gives a ~2 km plateau; the experimental loudness-event term (jets) shrank it ~4× on a field recording; needs more field data |
 | 3. Robustness | Indoors, phone calls, jets only, … | to do |
 | 4. Extensions | Unknown time, historical data, wind, distributed search | to do |
 
@@ -106,7 +106,7 @@ dgeo adsb-live --lat <lat> --lon <lon> --radius-nm 15 --out flights.csv
 
 ffmpeg -i rec.m4a -ac 1 -ar 16000 rec.wav
 dgeo spectro --wav rec.wav --out spectro.png
-dgeo detect  --wav rec.wav --out tracks.csv --png tracks.png
+dgeo detect  --wav rec.wav --out tracks.csv --png tracks.png   # also writes events.csv (loudness events)
 
 # phase 1: known position
 dgeo overlay --wav rec.wav --flights flights.csv --t0 2026-01-15T10:15:03+01:00 \
@@ -115,8 +115,9 @@ dgeo overlay --wav rec.wav --flights flights.csv --t0 2026-01-15T10:15:03+01:00 
 # phase 2: search
 dgeo search --tracks tracks.csv --flights flights.csv --wav rec.wav \
     --t0 2026-01-15T10:15:03+01:00 --lat <lat> --lon <lon> --radius-km 10 --out-dir out/
+#   add --events events.csv to also use broadband jet passes (experimental)
 
-# synthetic end-to-end demo
+# synthetic end-to-end demo (dgeo synth --broadband-jets adds jets heard as noise only)
 dgeo demo --out-dir demo/
 ```
 
@@ -135,6 +136,7 @@ dgeo/
   doppler.py    smoothed trajectories, retarded time (Newton), f/f0 ratio, CPA, straight-line model
   audio.py      WAV → whitened spectrogram (z-scores), log-frequency harmonic sum
   detect.py     track extraction, (f0, v, d, tc) fit, harmonic de-duplication
+  events.py     loudness events (broadband passes, mostly jets)
   score.py      track↔curve cost (closed-form f0) and tonal-contrast score on the spectrogram
   search.py     overlay (phase 1), coarse→fine search with shared clock offset and silence filter (phase 2)
   timeguess.py  start time from file metadata (start/end hypotheses)

@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Experimental loudness-event term: broadband passes (mostly jets) are detected as level peaks and matched
+  to predicted heard CPAs with a shared fitted lag, filtered by ADS-B emitter category (`--events`,
+  "Use loudness events" in the Search tab). Off by default.
+- Candidate area (cost ≤ min + 0.1 / 0.3) reported by the CLI and the UI, to make plateaus visible.
+- Synthetic scenario with broadband jets (`dgeo synth --broadband-jets`, UI option).
+
 ## 0.1.0 — initial public release
 
 - Forward model with retarded time (Newton), ENU frame, altitude handling (GNSS / baro + QNH / geoid), DEM support.

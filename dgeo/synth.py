@@ -41,7 +41,15 @@ def _flight(q_cpa, heading_deg, speed, accel, turn_dps, climb, t_cpa, span=(-400
     return Trajectory("", t_cpa + tau, p, v)
 
 
-def make(out_dir: str, seed: int = 1, dur: float = 300.0, fs: int = 8000):
+CATEGORY = {"AT76": "A2", "C172": "A1", "PA28": "A1", "A320": "A3", "A321": "A3", "A20N": "A3",
+            "B38M": "A3", "B738": "A3"}
+
+
+def make(out_dir: str, seed: int = 1, dur: float = 300.0, fs: int = 8000, broadband_jets: bool = False):
+    """``broadband_jets``: add jets 4–7 km away rendered as broadband noise (no tone), for the
+    loudness-event term; the recording is then lengthened to at least 600 s."""
+    if broadband_jets:
+        dur = max(dur, 600.0)
     rng = np.random.default_rng(seed)
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -64,6 +72,12 @@ def make(out_dir: str, seed: int = 1, dur: float = 300.0, fs: int = 8000):
         ("343146", "IBE3166", "A321", 20, 145, 0.0, 0.05, 6.0, 9000, 1200, 30, None),
         ("34510b", "ECMLT", "PA28", 90, 55, 0.0, 0.1, 0.0, 1200, 500, -150, None),
     ]
+    if broadband_jets:  # silent in tone, loud in broadband noise
+        specs += [
+            ("3c6745", "DLH1123", "A320", 300, 140, 0.0, 0.0, -4.0, 4200, 1800, 300, None),
+            ("4ca2d7", "RYR88AB", "B738", 30, 160, 0.0, 0.02, -3.0, -3600, 2400, 400, None),
+            ("343147", "IBE3170", "A20N", 120, 150, 0.0, 0.0, 5.0, 5200, 2600, 510, None),
+        ]
     rows, tracks_true = [], {}
     for hx, cs, ty, hdg, spd, acc, turn, climb, sd, agl, tcr, f0 in specs:
         q = obs + side(hdg) * sd
@@ -85,7 +99,7 @@ def make(out_dir: str, seed: int = 1, dur: float = 300.0, fs: int = 8000):
         gs = np.hypot(v[:, 0], v[:, 1]) / 0.514444
         trk = np.degrees(np.arctan2(v[:, 0], v[:, 1])) % 360
         for k in range(len(ts)):
-            rows.append([round(ts[k], 1), hx, cs, ty, "A1", lat[k], lon[k], alt_baro[k], alt_geom[k],
+            rows.append([round(ts[k], 1), hx, cs, ty, CATEGORY.get(ty, "A1"), lat[k], lon[k], alt_baro[k], alt_geom[k],
                          round(gs[k], 1), round(trk[k], 1), "adsb_icao"])
 
     import pandas as pd
@@ -115,13 +129,23 @@ def make(out_dir: str, seed: int = 1, dur: float = 300.0, fs: int = 8000):
         phase = 2 * np.pi * np.cumsum(f_s) / fs
         for k, hk in enumerate(harm, start=1):
             x += a_s * hk * np.sin(k * phase + rng.uniform(0, 2 * np.pi))
+    if broadband_jets:
+        from scipy.signal import butter, sosfilt
+        sos = butter(4, [200, 1500], btype="band", fs=fs, output="sos")
+        for hx, (tj, f0) in tracks_true.items():
+            if f0 is not None or CATEGORY.get(dict((s_[0], s_[2]) for s_ in specs)[hx]) != "A3":
+                continue
+            _, _, _, R, _, valid = emission(tj, obs[None, :], tg, c)
+            amp = np.where(valid[0], 0.15 * (4000.0 / R[0]) ** 2, 0.0)
+            x += np.interp(ta, tg, amp) * sosfilt(sos, rng.normal(0, 1, n))
     x = x / (np.abs(x).max() * 1.05)
     wavfile.write(out / "rec.wav", fs, (x * 32767).astype(np.int16))
 
     lat, lon, _ = frame.to_geodetic(obs[0], obs[1], obs[2])
     truth = {"lat": float(lat), "lon": float(lon), "t0_reported": t0_reported, "clock_error_s": clock_err,
              "duration_s": dur, "ground_ortho_m": GROUND, "geoid_n": SYNTH_GEOID_N, "temp_c": 15.0,
-             "center": CENTER, "audible": [s[1] for s in specs if s[-1] is not None]}
+             "center": CENTER, "audible": [s[1] for s in specs if s[-1] is not None],
+             "broadband_jets": broadband_jets}
     (out / "truth.json").write_text(json.dumps(truth, indent=2))
     return truth
 
