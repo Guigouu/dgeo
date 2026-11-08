@@ -81,14 +81,27 @@ UTC, to within ~2 s. The app pre-fills the start time from it and lets you flip 
 - **Historical ADS-B** (if the live capture failed): adsb.lol daily dumps (ODbL 1.0),
   `github.com/adsblol/globe_history_<year>`, one release per day and per instance (`…-planes-readsb-prod-0`).
 
+  A full day weighs several GB. There is no need to extract it: `--tar` reads the parts as one stream
+  and keeps only the positions inside the area and time window.
+
   ```bash
   gh release download vYYYY.MM.DD-planes-readsb-prod-0 -R adsblol/globe_history_YYYY
-  mkdir globe && cat vYYYY.MM.DD-planes-readsb-prod-0.tar.a* | tar -xf - -C globe
-  python -m dgeo adsb-hist --traces-dir globe --start YYYY-MM-DDT09:00:00Z --end YYYY-MM-DDT10:00:00Z \
-      --lat <lat> --lon <lon> --radius-km 30 --out flights.csv
+  python -m dgeo adsb-hist --tar vYYYY.MM.DD-planes-readsb-prod-0.tar.a* \
+      --start YYYY-MM-DDT09:00:00Z --end YYYY-MM-DDT10:00:00Z --lat <lat> --lon <lon> --radius-km 30 \
+      --out flights.csv
   ```
 
-  A full day weighs several GB; check the exact asset names of the release.
+  To avoid storing the archive at all, pipe the download into it (`--tar -` reads stdin):
+
+  ```bash
+  TAG=vYYYY.MM.DD-planes-readsb-prod-0; R=adsblol/globe_history_YYYY
+  for a in $(gh release view $TAG -R $R --json assets -q '.assets[].name' | grep '\.tar\.a' | sort); do
+    gh release download $TAG -R $R -p "$a" -O -
+  done | python -m dgeo adsb-hist --tar - --start … --end … --lat <lat> --lon <lon> --out flights.csv
+  ```
+
+  An already extracted directory can still be read with `--traces-dir`. Check the exact asset names of the
+  release; they have changed over the years.
 
 ## Quick diagnosis
 

@@ -37,7 +37,7 @@ the video's author.
 | 1. Field test, known position | Predicted curves must overlay observed ones | ✅ A jet tone overlaid within ~2 s of clock offset |
 | 2. Search at known time | Recover one's own position | 🟡 One tonal pass gives a ~2 km plateau; the experimental loudness-event term (jets) shrank it ~4× on a field recording; needs more field data |
 | 3. Robustness | Indoors, phone calls, filtering, masking | 🟡 Synthetic benchmark: tracks survive high-pass filtering, speech masking, indoor and phone-call degradations; every failure is a lost pass ([docs/ROBUSTNESS.md](docs/ROBUSTNESS.md)); field data still needed |
-| 4. Extensions | Unknown time, historical data, wind, distributed search | to do |
+| 4. Extensions | Unknown time, historical data, wind, distributed search | 🟡 Implemented, validated on synthetic data only: unknown start time (`--time-window`), streamed historical ADS-B (`adsb-hist --tar`), uniform wind, multi-process and tiled search (`--workers`, `dgeo merge`) |
 
 ## Responsible use
 
@@ -116,6 +116,10 @@ dgeo overlay --wav rec.wav --flights flights.csv --t0 2026-01-15T10:15:03+01:00 
 dgeo search --tracks tracks.csv --flights flights.csv --wav rec.wav \
     --t0 2026-01-15T10:15:03+01:00 --lat <lat> --lon <lon> --radius-km 10 --out-dir out/
 #   add --events events.csv to also use broadband jet passes (experimental)
+#   add --time-window 600 if the start time is only known to ±10 min; --workers 4 to use 4 CPUs
+
+# past recording: stream a day of adsb.lol history and keep only your area/time window (see FIELD_GUIDE)
+dgeo adsb-hist --tar day.tar.a* --start <iso> --end <iso> --lat <lat> --lon <lon> --out flights.csv
 
 # synthetic end-to-end demo (dgeo synth --broadband-jets adds jets heard as noise only)
 dgeo demo --out-dir demo/
@@ -150,7 +154,7 @@ tests/          physics, metadata timing, end to end
 
 ## Known limitations
 
-- **Wind** is not modelled (effective speed of sound changes by a few m/s along the ray).
+- **Wind** is modelled as one uniform vector from the surface report (`--wind-speed`, `--wind-from`, sidebar); wind aloft is not.
 - **Light aviation**: in Europe ADS-B Out is only mandatory above 5.7 t or 250 kt; many small aircraft
   do not broadcast positions. Turboprops, equipped helicopters and jets are the useful targets.
 - **Jets** are mostly broadband noise, which tone detection ignores; only their occasional tones are used.
@@ -160,10 +164,23 @@ tests/          physics, metadata timing, end to end
 
 ## Releases
 
-Versions follow [semantic versioning](https://semver.org/) (0.x: anything may change). To release,
-bump `version` in `pyproject.toml` and `dgeo/__init__.py`, add a section to `CHANGELOG.md`, then push a
-tag `vX.Y.Z`: the release workflow tests, builds the wheel and the Docker image
-(`ghcr.io/guigouu/dgeo`), and publishes the GitHub Release.
+Versions follow [semantic versioning](https://semver.org/) (0.x: anything may change). Releases are
+automatic: when `main` contains a version with no `vX.Y.Z` tag yet, the release workflow runs the tests,
+builds the wheel and the Docker image (`ghcr.io/guigouu/dgeo`), creates the tag and publishes the
+GitHub Release with the matching `CHANGELOG.md` section.
+
+One release per merged feature or fix:
+
+| Change | Version bump | Example |
+|---|---|---|
+| new feature (`feat`) | minor | 0.2.0 → 0.3.0 |
+| bug fix (`fix`) | patch | 0.3.0 → 0.3.1 |
+| docs, tests, CI only | none: listed under `## Unreleased`, shipped with the next release | |
+
+```bash
+python scripts/bump_version.py minor   # or patch: pyproject.toml + dgeo/__init__.py, Unreleased -> X.Y.Z
+# commit with the PR; merging it into main publishes the release
+```
 
 ## Contributing
 

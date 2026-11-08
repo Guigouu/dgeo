@@ -46,6 +46,15 @@ one (see `test_naive_model_is_wrong`). `c = 331.3·√(1 + T/273.15)`.
 The ratio `f_obs/f0` is the same for every harmonic: we never know which harmonic a track follows,
 and we do not need to.
 
+### Wind (optional)
+
+A uniform horizontal wind `w` (from the METAR: speed, direction it blows FROM) changes the sound speed
+along each ray: `c_eff = c + w·n`, with `n` the unit vector from the source to the observer. It enters
+both the retarded time (`t_obs = t_e + R / c_eff`) and the Doppler ratio, `f_obs = f0·c_eff / (c_eff + Ṙ)`
+(in the air frame the observer moves at `−w` and the source at `v − w`). On synthetic scenarios with a
+12 m/s wind, modelling it reduced the error from 26 to 15 m and from 42 to 33 m: a second-order effect for
+passes within ~1 km, larger for distant ones. Wind aloft differs from the surface wind; a single value is used.
+
 ## 4. Spectrogram
 
 - resampling to 8 kHz, 1 s Hann STFT, 0.25 s hop (≈ 1 Hz resolution);
@@ -126,6 +135,30 @@ cost. ≈ 1.0 means a plateau (position poorly constrained); on the synthetic be
 A single high-altitude pass typically yields a plateau about 2 km wide on either side of its ground
 track; two or more passes are needed for a sharp solution.
 
+### Unknown recording time
+
+When the start time is only roughly known (a file without usable metadata, a clip cut from a longer
+recording), `--time-window S` (UI: "Unknown start time") scans the shared clock offset over ±S seconds:
+
+1. coarse grid with `dt` in ±S at `--time-step` (1 s);
+2. each of the best distinct zones (distinct in space, or more than 20 s apart in time) is refined at 25 m
+   with `dt` in ±`dt_max` at 0.25 s around its own best offset;
+3. the report gives the estimated start time and the margin to the best solution at another time.
+
+The offset between two passes is still fixed by the geometry, so with two or more passes position and
+time are recovered together. On the synthetic benchmark with a start time off by 2–4 minutes and a ±10 min
+window: 15 and 32 m error, time within 1.5 s (the same as at known time). With a **single** pass, position and
+time trade off: one test went from 343 m at known time to 4.5 km at unknown time. The scan costs about
+`2·S / time_step` times more physics per grid point than a known-time search (2–3× slower overall on the
+benchmark for a ±5–10 min window, thanks to the shared physics grid).
+
+### Large areas: parallel and distributed search
+
+Grid points are independent. `--workers N` splits their scoring over N local processes (CLI only).
+To spread a very large area over several machines, run one search per tile, with the same tracks,
+ADS-B file and parameters, and adjacent `--lat/--lon/--radius-km` discs. Merge the outputs with
+`dgeo merge tile*/candidates.csv`: costs are absolute, so the merged list can be sorted directly.
+
 ## 8. "Energy" mode (phase 1, known position)
 
 At a known position, for each flight: predicted curve over all frames, then an f0 sweep by vertical
@@ -136,10 +169,17 @@ curve stands out. The clock offset `dt` is swept globally. This produces the plo
 
 ## 9. Known limitations and ideas
 
-- **Wind** is not modelled: `c_eff = c + w·û` along the ray (METAR / model profile).
-- **Jets** are mostly broadband. Their loudness peaks are still informative (in field tests they
-  preceded the heard CPA by a fairly constant 10–20 s); a timing-based term could use them.
-- **Unknown recording time**: a large `dt_max` (60–600 s) with a coarse-then-fine step, pre-filtered
-  by the fitted (v, d).
+- **Wind** is modelled as a single uniform vector (surface METAR); a vertical profile would be better for high passes.
+- **Jets** are mostly broadband: see the experimental loudness-event term (§6b).
+- **Ground reflection (Lloyd's mirror)** is another way to exploit broadband jets: the direct and
+  ground-reflected paths interfere, and the cepstral delay `τ ≈ 2·h·sin θ / c` (h = microphone height,
+  θ = source elevation) traces the pass geometry (Lo & Ferguson, IEEE TAES 2002–2003; implemented in
+  [hermes-aircraft-doppler-geolocation](https://github.com/mojomast/hermes-aircraft-doppler-geolocation),
+  `docs/broadband.md`). It was **not adopted**: tested on a 90-minute urban phone recording (microphone on a
+  first-floor balcony, AAC, jets 5–7 km away at 3–5 km altitude), neither a cepstral search along the delays
+  predicted from ADS-B (microphone heights 2–15 m) nor that project's own detector found any fringe track.
+  The method needs close passes over hard, open ground and lossless audio; it is worth revisiting with such
+  recordings.
+- **Unknown recording time** over hours: pre-filter flights with the fitted (v, d) of each track before the
+  scan (not implemented).
 - Score the N best candidates in energy mode too (faint tracks that were not detected).
-- Tile-level parallelism for large areas.

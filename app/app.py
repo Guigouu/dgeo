@@ -28,7 +28,7 @@ from dgeo.audio import load_wav, spectrogram  # noqa: E402
 from dgeo.cli import haversine  # noqa: E402
 from dgeo.detect import detect, from_frame, to_frame  # noqa: E402
 from dgeo.doppler import build_trajectories  # noqa: E402
-from dgeo.geo import Dem, LocalFrame, speed_of_sound  # noqa: E402
+from dgeo.geo import Dem, LocalFrame, speed_of_sound, wind_vector  # noqa: E402
 from dgeo.plots import heatmap_fig, overlay_fig, spectro_fig  # noqa: E402
 from dgeo.events import detect_events as detect_loudness, from_frame as events_from_frame  # noqa: E402
 from dgeo.events import to_frame as events_frame  # noqa: E402
@@ -123,6 +123,12 @@ def trajs_for(s: Path, m: dict, frame):
                               alt_source=m.get("alt_source", "auto"))
 
 
+def session_wind(m: dict):
+    """Uniform wind (ENU m/s) from the session parameters, or None."""
+    kt = float(m.get("wind_kt", 0.0) or 0.0)
+    return tuple(wind_vector(kt * 0.514444, float(m.get("wind_from", 0.0)))) if kt > 0 else None
+
+
 def show_fig(fig):
     st.pyplot(fig, clear_figure=True)
 
@@ -175,6 +181,11 @@ if _ups and (S / "rec.wav").exists() and not M.get("audio_name"):
 
 with st.sidebar.expander("Physical parameters", expanded=False):
     temp = st.number_input("Air temperature (°C)", value=float(M.get("temp_c", 15.0)), step=1.0)
+    wcol1, wcol2 = st.columns(2)
+    wind_kt = wcol1.number_input("Wind (kt)", value=float(M.get("wind_kt", 0.0)), min_value=0.0, step=1.0,
+                                 help="surface wind from the METAR; 0 = no wind model")
+    wind_from = wcol2.number_input("From (°)", value=float(M.get("wind_from", 0.0)), min_value=0.0,
+                                   max_value=360.0, step=10.0, help="direction the wind blows FROM")
     qnh = st.number_input("QNH (hPa) — nearest airport METAR", value=float(M.get("qnh", 1013.25)), step=1.0)
     ground = st.number_input("Ground elevation if no DEM (m)", value=float(M.get("ground_elev", 0.0)),
                              help="orthometric elevation of the ground (m above mean sea level)")
@@ -183,7 +194,8 @@ with st.sidebar.expander("Physical parameters", expanded=False):
     alt_src = st.selectbox("Aircraft altitude", ["auto", "geom", "baro"],
                            index=["auto", "geom", "baro"].index(M.get("alt_source", "auto")))
     if st.button("Save parameters"):
-        save_meta(S, temp_c=temp, qnh=qnh, ground_elev=ground, geoid_n=geoid, alt_source=alt_src)
+        save_meta(S, temp_c=temp, qnh=qnh, ground_elev=ground, geoid_n=geoid, alt_source=alt_src,
+                  wind_kt=wind_kt, wind_from=wind_from)
         st.rerun()
     dem_up = st.file_uploader("DEM GeoTIFF tile (Copernicus GLO-30)", type=["tif", "tiff"])
     if dem_up:
@@ -410,7 +422,7 @@ with tabs[3]:
             sp, _ = cached_spectro(str(S / "rec.wav"), (S / "rec.wav").stat().st_mtime, 1.0, 0.25)
             _, _, obs = observers(frame, dem, np.array([0.0]), np.array([0.0]), agl)
             with st.spinner("Forward model + f0 fit…"):
-                curves, dt = overlay_curves(sp, trajs, obs[0], float(M["t0"]), c, dt_max=dtm)
+                curves, dt = overlay_curves(sp, trajs, obs[0], float(M["t0"]), c, dt_max=dtm, wind=session_wind(M))
             tracks = from_frame(pd.read_csv(S / "tracks.csv")) if (S / "tracks.csv").exists() else None
             st.metric("Estimated clock offset", f"{dt:+.2f} s")
             st.dataframe(pd.DataFrame([{k: v for k, v in cv.items() if k not in ("ratio", "valid")} for cv in curves])
@@ -449,19 +461,29 @@ with tabs[4]:
                                   "with dense traffic. See docs/METHOD.md.")
         ev_w = e2.number_input("Event weight", value=0.25, min_value=0.0, max_value=2.0, step=0.05,
                                disabled=not use_ev)
+        u1, u2 = st.columns([2, 1])
+        unk = u1.checkbox("Unknown start time", value=False,
+                          help="Scan the clock offset over a wide window around the start time (1 s steps), "
+                               "then refine each candidate area at the normal step. Slower, and more passes are "
+                               "needed: with one pass, position and time trade off.")
+        twin = u2.number_input("Time window ± (s)", value=600, min_value=10, max_value=3600, step=60,
+                               disabled=not unk)
         if st.button("Run search", type="primary"):
             frame, dem, c = env(M, slat, slon)
             trajs = trajs_for(S, M, frame)
             tracks = from_frame(pd.read_csv(S / "tracks.csv"))
             cfg = SearchConfig(radius_km=srad, coarse_m=coarse, fine_m=fine, dt_max=dtm, audible_m=aud,
-                               max_range_m=mrng, obs_agl=float(M.get("obs_agl", 1.5)), event_weight=ev_w)
+                               wind=session_wind(M),
+                               max_range_m=mrng, obs_agl=float(M.get("obs_agl", 1.5)), event_weight=ev_w,
+                               time_window_s=float(twin) if unk else 0.0)
             events = events_from_frame(pd.read_csv(S / "events.csv")) if use_ev else []
             box = st.empty()
             with st.spinner("Grid search…"):
                 res = search(tracks, trajs, frame, dem, float(M["t0"]), float(M.get("duration", 300)), c, cfg,
                              log=lambda msg: box.caption(msg), events=events)
             res.to_csv(S / "candidates.csv", index=False)
-            save_meta(S, center_lat=slat, center_lon=slon, search_coarse_m=coarse, search_fine_m=fine)
+            save_meta(S, center_lat=slat, center_lon=slon, search_coarse_m=coarse, search_fine_m=fine,
+                      search_time_window=float(twin) if unk else 0.0)
             st.rerun()
         if (S / "candidates.csv").exists():
             res = pd.read_csv(S / "candidates.csv")
@@ -492,6 +514,16 @@ with tabs[4]:
             if "event_lag" in res.columns and any(c.startswith("ev") and c.endswith("_flight") for c in res.columns):
                 a3.metric("Loudness events: lag", f"{b.event_lag:+.0f} s",
                           help="loudness peak − heard CPA, shared by all events (fitted)")
+            if float(M.get("search_time_window", 0)) > 0:
+                t_est = pd.Timestamp(float(M["t0"]) + float(b["dt"]), unit="s", tz="UTC")
+                other = res[(res["dt"] - b["dt"]).abs() > 20]
+                t1, t2 = st.columns(2)
+                t1.metric("Estimated start time (UTC)", t_est.strftime("%Y-%m-%d %H:%M:%S"),
+                          help=f"offset {b['dt']:+.1f} s from the start time of the Audio tab")
+                if len(other):
+                    t2.metric("Best other time: margin", f"{other.iloc[0].cost - b.cost:.2f}",
+                              help=f"best point at an offset more than 20 s away ({other.iloc[0]['dt']:+.0f} s). "
+                                   "A small margin means the time is ambiguous.")
 
             # ---- relative cost classes (cost / best cost) ----
             CLASSES = [  # (key, label, upper bound of the ratio, RGB colour)
