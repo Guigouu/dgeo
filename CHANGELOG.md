@@ -7,6 +7,8 @@
   "Use loudness events" in the Search tab). Off by default.
 - Candidate area (cost ≤ min + 0.1 / 0.3) reported by the CLI and the UI, to make plateaus visible.
 - Synthetic scenario with broadband jets (`dgeo synth --broadband-jets`, UI option).
+- Robustness benchmark (`scripts/robustness.py`, `docs/ROBUSTNESS.md`): lossy codecs, phone call,
+  high-pass filtering, noise suppression, indoors, speech masking.
 
 ## 0.1.0 — initial public release
 

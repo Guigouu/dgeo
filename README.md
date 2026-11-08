@@ -36,7 +36,7 @@ the video's author.
 | 0. Synthetic benchmark | Validate the pipeline end to end | ✅ 15–30 m error, clock offset recovered to ±0.25 s (`make test`) |
 | 1. Field test, known position | Predicted curves must overlay observed ones | ✅ A jet tone overlaid within ~2 s of clock offset |
 | 2. Search at known time | Recover one's own position | 🟡 One tonal pass gives a ~2 km plateau; the experimental loudness-event term (jets) shrank it ~4× on a field recording; needs more field data |
-| 3. Robustness | Indoors, phone calls, jets only, … | to do |
+| 3. Robustness | Indoors, phone calls, filtering, masking | 🟡 Synthetic benchmark: tracks survive high-pass filtering, speech masking, indoor and phone-call degradations; every failure is a lost pass ([docs/ROBUSTNESS.md](docs/ROBUSTNESS.md)); field data still needed |
 | 4. Extensions | Unknown time, historical data, wind, distributed search | to do |
 
 ## Responsible use
@@ -124,6 +124,7 @@ dgeo demo --out-dir demo/
 ## Documentation
 
 - [docs/METHOD.md](docs/METHOD.md) — physics and algorithms (frames, retarded time, detection, cost, search).
+- [docs/ROBUSTNESS.md](docs/ROBUSTNESS.md) — what survives codecs, filtering, masking and phone calls.
 - [docs/FIELD_GUIDE.md](docs/FIELD_GUIDE.md) — how to make useful recordings, clock sync, supporting data, diagnosis.
 - [THIRD_PARTY.md](THIRD_PARTY.md) — dependency licences and data-source terms.
 
