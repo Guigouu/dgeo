@@ -38,8 +38,8 @@ s = p.read_text()
 today = datetime.date.today().isoformat()
 if re.search(rf"(?m)^## {re.escape(new)}\b", s):
     pass
-elif re.search(r"(?m)^## Unreleased\s*$", s):
-    s = re.sub(r"(?m)^## Unreleased\s*$", f"## {new} — {today}", s, count=1)
+elif re.search(r"(?m)^## Unreleased[ \t]*$", s):
+    s = re.sub(r"(?m)^## Unreleased[ \t]*$", f"## {new} — {today}", s, count=1)
 else:
     s = s.replace("# Changelog\n", f"# Changelog\n\n## {new} — {today}\n\n- TODO: describe the changes.\n", 1)
 p.write_text(s)

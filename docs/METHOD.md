@@ -135,6 +135,30 @@ cost. ≈ 1.0 means a plateau (position poorly constrained); on the synthetic be
 A single high-altitude pass typically yields a plateau about 2 km wide on either side of its ground
 track; two or more passes are needed for a sharp solution.
 
+### Unknown recording time
+
+When the start time is only roughly known (a file without usable metadata, a clip cut from a longer
+recording), `--time-window S` (UI: "Unknown start time") scans the shared clock offset over ±S seconds:
+
+1. coarse grid with `dt` in ±S at `--time-step` (1 s);
+2. each of the best distinct zones (distinct in space, or more than 20 s apart in time) is refined at 25 m
+   with `dt` in ±`dt_max` at 0.25 s around its own best offset;
+3. the report gives the estimated start time and the margin to the best solution at another time.
+
+The offset between two passes is still fixed by the geometry, so with two or more passes position and
+time are recovered together. On the synthetic benchmark with a start time off by 2–4 minutes and a ±10 min
+window: 15 and 32 m error, time within 1.5 s (the same as at known time). With a **single** pass, position and
+time trade off: one test went from 343 m at known time to 4.5 km at unknown time. The scan costs about
+`2·S / time_step` times more physics per grid point than a known-time search (2–3× slower overall on the
+benchmark for a ±5–10 min window, thanks to the shared physics grid).
+
+### Large areas: parallel and distributed search
+
+Grid points are independent. `--workers N` splits their scoring over N local processes (CLI only).
+To spread a very large area over several machines, run one search per tile, with the same tracks,
+ADS-B file and parameters, and adjacent `--lat/--lon/--radius-km` discs. Merge the outputs with
+`dgeo merge tile*/candidates.csv`: costs are absolute, so the merged list can be sorted directly.
+
 ## 8. "Energy" mode (phase 1, known position)
 
 At a known position, for each flight: predicted curve over all frames, then an f0 sweep by vertical
@@ -146,8 +170,7 @@ curve stands out. The clock offset `dt` is swept globally. This produces the plo
 ## 9. Known limitations and ideas
 
 - **Wind** is modelled as a single uniform vector (surface METAR); a vertical profile would be better for high passes.
-- **Jets** are mostly broadband. Their loudness peaks are still informative (in field tests they
-  preceded the heard CPA by a fairly constant 10–20 s); a timing-based term could use them.
+- **Jets** are mostly broadband: see the experimental loudness-event term (§6b).
 - **Ground reflection (Lloyd's mirror)** is another way to exploit broadband jets: the direct and
   ground-reflected paths interfere, and the cepstral delay `τ ≈ 2·h·sin θ / c` (h = microphone height,
   θ = source elevation) traces the pass geometry (Lo & Ferguson, IEEE TAES 2002–2003; implemented in
@@ -157,7 +180,6 @@ curve stands out. The clock offset `dt` is swept globally. This produces the plo
   predicted from ADS-B (microphone heights 2–15 m) nor that project's own detector found any fringe track.
   The method needs close passes over hard, open ground and lossless audio; it is worth revisiting with such
   recordings.
-- **Unknown recording time**: a large `dt_max` (60–600 s) with a coarse-then-fine step, pre-filtered
-  by the fitted (v, d).
+- **Unknown recording time** over hours: pre-filter flights with the fitted (v, d) of each track before the
+  scan (not implemented).
 - Score the N best candidates in energy mode too (faint tracks that were not detected).
-- Tile-level parallelism for large areas.

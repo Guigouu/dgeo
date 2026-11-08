@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.0 — 2026-11-08
+
+- Unknown start time: `--time-window S` (UI: "Unknown start time") scans the clock offset over ±S s, then
+  refines each zone around its own offset; the report gives the estimated start time.
+- Historical ADS-B without extraction: `dgeo adsb-hist --tar parts…` (or `--tar -` from a download pipe)
+  streams a globe_history archive; callsign and category sent before the window are kept.
+- Multi-process scoring (`dgeo search --workers N`) and `dgeo merge` for searches split into tiles.
+- Fix: `python -m dgeo` no longer re-runs the command in worker processes.
+
 ## 0.3.0 — 2026-11-08
 
 - Uniform wind in the forward model (retarded time and Doppler ratio): `--wind-speed` / `--wind-from`,

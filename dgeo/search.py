@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 import pandas as pd
@@ -25,6 +25,12 @@ class SearchConfig:
     refine_radius_m: float = 500.0
     dt_max: float = 3.0           # uncertainty on the recording clock (s)
     dt_step: float = 0.25
+    dt_center: float = 0.0        # centre of the clock-offset window (s)
+    # unknown recording time: if time_window_s > dt_max, the coarse grid scans dt over
+    # ±time_window_s at time_step_s, then each refined zone uses ±dt_max at dt_step around its best dt
+    time_window_s: float = 0.0
+    time_step_s: float = 1.0
+    workers: int = 1              # processes used to score the grid points (points are independent)
     max_range_m: float = 8000.0   # max slant range for an aircraft to be a candidate
     audible_m: float = 2000.0     # an aircraft passing closer MUST appear (silence filter)
     silence_penalty: float = 1.0  # cost added per audible pass that was not observed
@@ -109,7 +115,7 @@ def score_points(obs: np.ndarray, tracks: list[TrackObs], trajs: list[Trajectory
                  c: float, cfg: SearchConfig, chunk: int = 400, events: list[LoudnessEvent] | None = None):
     """Cost of each point (M,) + details. The clock offset dt is shared by all tracks ("locked")."""
     M = len(obs)
-    dts = np.arange(-cfg.dt_max, cfg.dt_max + 1e-9, cfg.dt_step)
+    dts = cfg.dt_center + np.arange(-cfg.dt_max, cfg.dt_max + 1e-9, cfg.dt_step)
     D = len(dts)
     nT = len(tracks)
     cost = np.full((nT, M, D), cfg.miss_cost)
@@ -120,25 +126,26 @@ def score_points(obs: np.ndarray, tracks: list[TrackObs], trajs: list[Trajectory
 
     # CPA of each flight for each point (used for the pre-filter and the silence filter)
     for k, tj in enumerate(trajs):
-        if tj.t[-1] < t0 - 90 or tj.t[0] > t0 + dur + 10:
+        if tj.t[-1] < t0 + dts[0] - 90 or tj.t[0] > t0 + dts[-1] + dur + 10:
             continue
         rmin_all[k], tcpa_all[k] = cpa(tj, obs, c, cfg.wind)
 
     for i, tr in enumerate(tracks):
         tk, fk = _sub(tr, cfg.max_samples)
         # The physics (retarded time) is computed once on a regular grid u covering
-        # [track start - dt_max, track end + dt_max]; each (dt, sample) pair is then
+        # [track start + min dt, track end + max dt]; each (dt, sample) pair is then
         # interpolated on it. Cost ~ (track duration / dt_step) instead of D x K.
-        u = np.arange(tk[0] - cfg.dt_max, tk[-1] + cfg.dt_max + cfg.dt_step, cfg.dt_step)
+        u = np.arange(tk[0] + dts[0], tk[-1] + dts[-1] + cfg.dt_step, cfg.dt_step)
         x = (tk[None, :] + dts[:, None] - u[0]) / cfg.dt_step   # (D,K)
         j0 = np.clip(x.astype(int), 0, len(u) - 2)
         w = x - j0
         for k, tj in enumerate(trajs):
-            if tj.t[-1] < t0 + tk[0] - cfg.dt_max - 60 or tj.t[0] > t0 + tk[-1] + cfg.dt_max:
+            if tj.t[-1] < t0 + tk[0] + dts[0] - 60 or tj.t[0] > t0 + tk[-1] + dts[-1]:
                 continue
             cand = np.where(rmin_all[k] < cfg.max_range_m)[0]
-            for s in range(0, len(cand), chunk):
-                idx = cand[s:s + chunk]
+            step = max(8, min(chunk, int(3e6 / (D * len(tk)))))  # bound the (m,D,K) arrays
+            for s in range(0, len(cand), step):
+                idx = cand[s:s + step]
                 ru, _, vu = doppler_ratio(tj, obs[idx], t0 + u, c, cfg.wind)          # (m,U)
                 ratio = ru[:, j0] * (1 - w) + ru[:, j0 + 1] * w              # (m,D,K)
                 valid = vu[:, j0] & vu[:, j0 + 1]
@@ -186,6 +193,25 @@ def score_points(obs: np.ndarray, tracks: list[TrackObs], trajs: list[Trajectory
     return total[r, best_d], detail
 
 
+def _score_parallel(obs, tracks, trajs, t0, dur, c, cfg, events, workers: int):
+    """Same as score_points, with the grid points split over ``workers`` processes."""
+    from concurrent.futures import ProcessPoolExecutor
+    from multiprocessing import get_context
+
+    parts = np.array_split(np.arange(len(obs)), workers)
+    with ProcessPoolExecutor(workers, mp_context=get_context("spawn")) as ex:
+        futs = [ex.submit(score_points, obs[i], tracks, trajs, t0, dur, c, cfg, events=events) for i in parts]
+        res = [f.result() for f in futs]
+    cost = np.concatenate([r[0] for r in res])
+    d0 = res[0][1]
+    detail = {k: np.concatenate([r[1][k] for r in res]) for k in ("dt", "event_cost", "event_lag",
+                                                                   "silence_violations")}
+    detail["events"] = [np.concatenate([r[1]["events"][e] for r in res]) for e in range(len(d0["events"]))]
+    detail["tracks"] = [{k: np.concatenate([r[1]["tracks"][i][k] for r in res]) for k in d0["tracks"][i]}
+                        for i in range(len(d0["tracks"]))]
+    return cost, detail
+
+
 def candidate_area(df: pd.DataFrame, coarse_m: float, deltas=(0.1, 0.3)) -> dict:
     """Size of the low-cost area on the coarse grid: for each delta, the area (km²) of the points whose cost
     is within ``delta`` of the minimum, and their max distance (m) from the best point. A large area means the
@@ -217,11 +243,14 @@ def search(tracks: list[TrackObs], trajs: list[Trajectory], frame: LocalFrame, d
     if not tracks and not events:
         raise ValueError("no observed tracks or loudness events: run detection first")
 
-    def run(E, N, stage):
+    def run(E, N, stage, cfg):
         lat, lon, obs = observers(frame, dem, E, N, cfg.obs_agl)
         log(f"[search] {stage}: {len(E)} points x {len(trajs)} flights x {len(tracks)} tracks"
             f" + {len(events)} loudness events")
-        cst, det = score_points(obs, tracks, trajs, t0, dur, c, cfg, events=events)
+        if cfg.workers > 1 and len(E) >= 4 * cfg.workers:
+            cst, det = _score_parallel(obs, tracks, trajs, t0, dur, c, cfg, events, cfg.workers)
+        else:
+            cst, det = score_points(obs, tracks, trajs, t0, dur, c, cfg, events=events)
         df = pd.DataFrame({"lat": lat, "lon": lon, "e": E, "n": N, "cost": cst, "dt": det["dt"],
                            "silence_violations": det["silence_violations"],
                            "event_cost": det["event_cost"], "event_lag": det["event_lag"]})
@@ -233,19 +262,34 @@ def search(tracks: list[TrackObs], trajs: list[Trajectory], frame: LocalFrame, d
             df[f"trk{i}_rms"] = d["rms_pct"]
         return df
 
+    unknown_time = cfg.time_window_s > cfg.dt_max
     E, N = _grid(0.0, 0.0, cfg.radius_km * 1000, cfg.coarse_m)
-    coarse = run(E, N, "coarse grid").sort_values("cost")
+    if unknown_time:
+        log(f"[search] unknown time: clock offset scanned over ±{cfg.time_window_s:g} s "
+            f"(step {cfg.time_step_s:g} s), then ±{cfg.dt_max:g} s around each zone")
+        coarse = run(E, N, "coarse grid", replace(cfg, dt_max=cfg.time_window_s, dt_step=cfg.time_step_s))
+    else:
+        coarse = run(E, N, "coarse grid", cfg)
+    coarse = coarse.sort_values("cost")
     seeds = []
     for _, row in coarse.iterrows():
         if len(seeds) >= cfg.refine_top:
             break
-        if all((row.e - a) ** 2 + (row.n - b) ** 2 > (2 * cfg.refine_radius_m) ** 2 for a, b in seeds):
-            seeds.append((row.e, row.n))
-    fe, fn = [], []
-    for a, b in seeds:
-        e_, n_ = _grid(a, b, cfg.refine_radius_m, cfg.fine_m, circle=False)
-        fe.append(e_); fn.append(n_)
-    fine = run(np.concatenate(fe), np.concatenate(fn), "refinement")
+        # a zone is new if it is far from the others, or (unknown time) at a clearly different time
+        if all((row.e - a) ** 2 + (row.n - b) ** 2 > (2 * cfg.refine_radius_m) ** 2
+               or (unknown_time and abs(row["dt"] - d) > 20) for a, b, d in seeds):
+            seeds.append((row.e, row.n, row["dt"]))
+    if unknown_time:
+        fine = pd.concat([run(*_grid(a, b, cfg.refine_radius_m, cfg.fine_m, circle=False),
+                              f"refinement {i + 1}/{len(seeds)} (dt {d:+.0f} s)",
+                              replace(cfg, dt_center=d, dt_max=max(cfg.dt_max, 2 * cfg.time_step_s)))
+                          for i, (a, b, d) in enumerate(seeds)], ignore_index=True)
+    else:
+        fe, fn = [], []
+        for a, b, _ in seeds:
+            e_, n_ = _grid(a, b, cfg.refine_radius_m, cfg.fine_m, circle=False)
+            fe.append(e_); fn.append(n_)
+        fine = run(np.concatenate(fe), np.concatenate(fn), "refinement", cfg)
     out = pd.concat([coarse.assign(stage="coarse"), fine.assign(stage="fine")], ignore_index=True)
     return out.sort_values("cost", ignore_index=True)
 
