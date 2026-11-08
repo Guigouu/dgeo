@@ -86,7 +86,7 @@ make local-ui
 
 | Tab | Purpose |
 |---|---|
-| ADS-B | Set the capture zone on a map (click = centre, circle = radius) or from an address / pasted coordinates, start/stop a live capture (adsb.lol and/or airplanes.live) inside the container, or import a `flights.csv`. |
+| ADS-B | Live capture while recording, or historical traffic downloaded from the adsb.lol archive for a past recording. Set the zone on a map (click = centre, circle = radius) or from an address / pasted coordinates, start/stop a live capture (adsb.lol and/or airplanes.live) inside the container, or import a `flights.csv`. |
 | Audio | Import (wav/m4a/mp3/… converted with ffmpeg), start time (pre-filled from file metadata), spectrogram. |
 | Detection | Automatic track extraction + fit (f0, speed, CPA distance). Hand-traced tracks can be imported as CSV. |
 | Overlay | **Phase 1** (optional): at a known position, predicted curves over the spectrogram + estimated clock offset. |
@@ -120,8 +120,8 @@ dgeo search --tracks tracks.csv --flights flights.csv --wav rec.wav \
 #   add --events events.csv to also use broadband jet passes (experimental)
 #   add --time-window 600 if the start time is only known to ±10 min; --workers 4 to use 4 CPUs
 
-# past recording: stream a day of adsb.lol history and keep only your area/time window (see FIELD_GUIDE)
-dgeo adsb-hist --tar day.tar.a* --start <iso> --end <iso> --lat <lat> --lon <lon> --out flights.csv
+# past recording (≥ 1–2 days old): stream the adsb.lol archive and keep only your zone/window (see FIELD_GUIDE)
+dgeo adsb-hist --download --start <iso> --end <iso> --lat <lat> --lon <lon> --out flights.csv
 
 # synthetic end-to-end demo (dgeo synth --broadband-jets adds jets heard as noise only)
 dgeo demo --out-dir demo/

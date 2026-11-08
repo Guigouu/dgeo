@@ -81,8 +81,17 @@ UTC, to within ~2 s. The app pre-fills the start time from it and lets you flip 
 - **Historical ADS-B** (if the live capture failed): adsb.lol daily dumps (ODbL 1.0),
   `github.com/adsblol/globe_history_<year>`, one release per day and per instance (`…-planes-readsb-prod-0`).
 
-  A full day weighs several GB. There is no need to extract it: `--tar` reads the parts as one stream
-  and keeps only the positions inside the area and time window.
+  Simplest: let dgeo stream the day(s) straight from GitHub and keep only your zone and window (UI: ADS-B tab →
+  "Historical (adsb.lol archive)"; nothing is stored but the filtered `flights.csv`):
+
+  ```bash
+  python -m dgeo adsb-hist --download --start YYYY-MM-DDT09:00:00Z --end YYYY-MM-DDT10:00:00Z \
+      --lat <lat> --lon <lon> --radius-km 30 --out flights.csv
+  ```
+
+  A full day weighs several GB, so this takes minutes to tens of minutes depending on the connection, and a
+  day is only published ~1–2 days later. If you already downloaded the parts, `--tar` reads them as one
+  stream without extracting:
 
   ```bash
   gh release download vYYYY.MM.DD-planes-readsb-prod-0 -R adsblol/globe_history_YYYY

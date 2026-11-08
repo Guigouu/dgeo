@@ -28,6 +28,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from . import __version__
+
+USER_AGENT = f"dgeo/{__version__} (+https://github.com/Guigouu/dgeo)"
 COLUMNS = ["t", "hex", "flight", "type", "category", "lat", "lon", "alt_baro", "alt_geom", "gs", "track", "src"]
 
 # ADSBExchange v2 format: {"ac": [...], "now": <ms>}; radius in nautical miles.
@@ -115,7 +118,7 @@ def _retry_after(r) -> float | None:
 
 
 def live(lat: float, lon: float, radius_nm: float, out: str, provider: str = "both",
-         interval: float = 3.0, duration: float | None = None, user_agent: str = "dgeo-poc/0.1"):
+         interval: float = 3.0, duration: float | None = None, user_agent: str = USER_AGENT):
     """Poll the API in a loop and append positions to the CSV. Ctrl-C to stop.
 
     ``provider`` = adsblol | airplaneslive | both. With ``both``, the two networks are polled
@@ -304,8 +307,13 @@ def hist_tar(parts: list[str], t_start: float, t_end: float, lat: float, lon: fl
     positions inside the area and time window. Nothing is extracted to disk, so a day of worldwide traces
     (several GB) can be filtered on a small machine, even while it downloads."""
     win = _Window(t_start, t_end, lat, lon, radius_km)
-    rows, n = [], 0
     stream = io.BufferedReader(_Concat(sorted(parts) if "-" not in parts else parts), buffer_size=1 << 20)
+    rows = _scan_tar(stream, win, log)
+    return pd.DataFrame(rows, columns=COLUMNS)
+
+
+def _scan_tar(stream, win: "_Window", log) -> list:
+    rows, n = [], 0
     with tarfile.open(fileobj=stream, mode="r|*") as tar:
         for m in tar:
             name = m.name.rsplit("/", 1)[-1]
@@ -320,6 +328,109 @@ def hist_tar(parts: list[str], t_start: float, t_end: float, lat: float, lon: fl
                 continue
             rows += win.rows(js, name.split(".")[0].replace("trace_full_", ""))
     log(f"[hist] {n} traces read, {len(rows)} positions kept")
+    return rows
+
+
+# --------------------------------------------------------------------------- download from adsb.lol
+# Daily releases of github.com/adsblol/globe_history_<year> (also mirrored in globe_history), one per readsb
+# instance: tag v<YYYY.MM.DD>-planes-readsb-<instance>, asset <tag>.tar split in .aa, .ab, ... parts.
+# A day is published about 1-2 days later and weighs several GB: it is streamed and filtered on the fly.
+HISTORY_URL = "https://github.com/adsblol/{repo}/releases/download/{tag}/{tag}.tar.{part}"
+
+
+def _part_names():
+    for a in "abcdefghijklmnopqrstuvwxyz":
+        for b in "abcdefghijklmnopqrstuvwxyz":
+            yield a + b
+
+
+class _HttpParts(io.RawIOBase):
+    """The split parts of one release, downloaded in order and read as one stream (stops at the first 404)."""
+
+    def __init__(self, day: str, instance: str, session, log, timeout: float = 60.0):
+        self.tag = f"v{day}-planes-readsb-{instance}"
+        self.repos = [f"globe_history_{day[:4]}", "globe_history"]
+        self.session, self.log, self.timeout = session, log, timeout
+        self.parts = _part_names()
+        self.resp = None
+        self.it = None
+        self.n_bytes = 0
+        self.next_report = 0
+
+    def readable(self):
+        return True
+
+    def _open_next(self) -> bool:
+        part = next(self.parts)
+        while self.repos:
+            url = HISTORY_URL.format(repo=self.repos[0], tag=self.tag, part=part)
+            r = self.session.get(url, stream=True, timeout=self.timeout, headers={"User-Agent": USER_AGENT})
+            if r.status_code == 404:
+                r.close()
+                if part == "aa":  # this repo does not have the day: try the next one
+                    self.repos.pop(0)
+                    continue
+                return False      # no more parts
+            r.raise_for_status()
+            if part == "aa":
+                self.log(f"[hist] downloading {self.tag} from {self.repos[0]}")
+                self.repos = self.repos[:1]
+            self.resp, self.it = r, r.iter_content(1 << 20)
+            return True
+        raise FileNotFoundError(f"{self.tag} not found (not published yet? days appear ~1-2 days later)")
+
+    def readinto(self, b):
+        while True:
+            if self.it is None and not self._open_next():
+                return 0
+            try:
+                chunk = next(self.it)
+            except StopIteration:
+                self.resp.close()
+                self.it = None
+                continue
+            if not chunk:
+                continue
+            if len(chunk) > len(b):  # keep the rest for the next call
+                self.it = _prepend(chunk[len(b):], self.it)
+                chunk = chunk[:len(b)]
+            b[:len(chunk)] = chunk
+            self.n_bytes += len(chunk)
+            if self.n_bytes >= self.next_report:
+                self.log(f"[hist] {self.n_bytes / 1e9:.2f} GB downloaded")
+                self.next_report += 250_000_000
+            return len(chunk)
+
+
+def _prepend(first, it):
+    yield first
+    yield from it
+
+
+def _utc_days(t_start: float, t_end: float) -> list[str]:
+    import datetime as _dt
+    d0 = _dt.datetime.fromtimestamp(t_start, _dt.timezone.utc).date()
+    d1 = _dt.datetime.fromtimestamp(t_end, _dt.timezone.utc).date()
+    return [(d0 + _dt.timedelta(days=k)).strftime("%Y.%m.%d") for k in range((d1 - d0).days + 1)]
+
+
+def hist_download(t_start: float, t_end: float, lat: float, lon: float, radius_km: float,
+                  instance: str = "prod-0", session=None, log=lambda m: print(m, file=sys.stderr)) -> pd.DataFrame:
+    """Past ADS-B for an area and time window, from the adsb.lol daily archives (ODbL 1.0): each UTC day
+    touched by the window is streamed from GitHub and filtered on the fly; nothing is written to disk."""
+    if t_end <= t_start:
+        raise ValueError("end must be after start")
+    if t_end - t_start > 2 * 86400:
+        raise ValueError("window longer than 2 days: each day is several GB to download")
+    import requests
+
+    sess = session or requests.Session()
+    win = _Window(t_start, t_end, lat, lon, radius_km)
+    rows = []
+    for day in _utc_days(t_start, t_end):
+        raw = _HttpParts(day, instance, sess, log)
+        rows += _scan_tar(io.BufferedReader(raw, buffer_size=1 << 20), win, log)
+        log(f"[hist] {day}: {raw.n_bytes / 1e9:.2f} GB read, {len(rows)} positions kept so far")
     return pd.DataFrame(rows, columns=COLUMNS)
 
 

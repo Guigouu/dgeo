@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.0 — 2026-11-09
+
+- Historical ADS-B mode: `dgeo adsb-hist --download` and the ADS-B tab's "Historical" source stream the
+  adsb.lol daily archive(s) from GitHub and keep only the zone and time window (defaults to the recording
+  ± 5 min). Live and historical modes share the zone settings.
+
 ## 0.6.0 — 2026-11-08
 
 - Capture-zone map in the ADS-B tab: the circle shows the capture radius, a click moves the centre
