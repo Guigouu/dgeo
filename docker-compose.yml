@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+services:
+  dgeo:
+    build: .
+    image: dgeo:latest
+    container_name: dgeo
+    ports:
+      # Bound to localhost: the UI has no authentication.
+      # To reach it from other devices on your LAN, use "8501:8501" (at your own risk).
+      - "127.0.0.1:8501:8501"
+    environment:
+      # AGPL §13: link shown in the UI to the source code of the running version.
+      DGEO_SOURCE_URL: "https://github.com/Guigouu/dgeo"
+    volumes:
+      - ./data:/data
+    restart: unless-stopped

@@ -1,0 +1,40 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install
+        run: pip install -e ".[ui,dem,dev]"
+      - name: Tests
+        run: pytest -q
+      - name: Synthetic end-to-end demo
+        run: dgeo demo --out-dir demo
+      - name: UI imports
+        run: python -m py_compile app/app.py
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t dgeo:ci .
+      - name: Tests in image
+        run: docker run --rm dgeo:ci python -m pytest -q tests
