@@ -103,7 +103,7 @@ At a known position, for each flight: predicted curve over all frames, then an f
 translation along the log-frequency harmonic-sum axis. The score is a **tonal contrast**: mean z along
 the curve minus the mean z along parallel curves at ±6 % in frequency. Broadband noise (jets, wind,
 traffic) lights up every frequency and scores ≈ 0; only a tone that actually follows the predicted
-curve stands out. The clock offset `dt` is swept globally. This produces the overlay in tab ④.
+curve stands out. The clock offset `dt` is swept globally. This produces the plot in the **Overlay** tab.
 
 ## 9. Known limitations and ideas
 
