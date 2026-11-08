@@ -58,7 +58,7 @@ make up                 # = docker compose up -d --build
 # UI: http://localhost:8501
 ```
 
-In the UI: sidebar → **Generate a test scenario**, then tabs ③ → ④ → ⑤. You should recover the
+In the UI: sidebar → **Generate a test scenario**, then the **Detection** → **Overlay** → **Search** tabs. You should recover the
 synthetic position within a few tens of metres.
 
 Other targets: `make test` (pytest in the container), `make demo` (CLI demo, outputs in `./data/demo`),
@@ -86,11 +86,11 @@ make local-ui
 
 | Tab | Purpose |
 |---|---|
-| ① ADS-B | Start/stop a live capture (adsb.lol and/or airplanes.live) inside the container, or import a `flights.csv`. |
-| ② Audio | Import (wav/m4a/mp3/… converted with ffmpeg), start time (pre-filled from file metadata), spectrogram. |
-| ③ Detection | Automatic track extraction + fit (f0, speed, CPA distance). Hand-traced tracks can be imported as CSV. |
-| ④ Overlay | **Phase 1** (optional): at a known position, predicted curves over the spectrogram + estimated clock offset. |
-| ⑤ Search | **Phase 2**: grid search, map with cost classes and toggleable layers, top candidates, CSV export. |
+| ADS-B | Start/stop a live capture (adsb.lol and/or airplanes.live) inside the container, or import a `flights.csv`. |
+| Audio | Import (wav/m4a/mp3/… converted with ffmpeg), start time (pre-filled from file metadata), spectrogram. |
+| Detection | Automatic track extraction + fit (f0, speed, CPA distance). Hand-traced tracks can be imported as CSV. |
+| Overlay | **Phase 1** (optional): at a known position, predicted curves over the spectrogram + estimated clock offset. |
+| Search | **Phase 2**: grid search, map with cost classes and toggleable layers, top candidates, CSV export. |
 
 Physical parameters (sidebar): air temperature, QNH, ground elevation or a DEM GeoTIFF tile, geoid
 undulation. Defaults are sea level and N = 0: **set them for your area**, an error of a few tens of
