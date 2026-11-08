@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.0 — 2026-11-08
+
+- Capture-zone map in the ADS-B tab: the circle shows the capture radius, a click moves the centre
+  (folium / streamlit-folium, OpenStreetMap tiles).
+
 ## 0.5.0 — 2026-11-08
 
 - Centre from an address or pasted coordinates (ADS-B tab, `dgeo geocode`): coordinates are parsed
