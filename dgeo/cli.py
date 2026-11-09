@@ -69,7 +69,12 @@ def cmd_adsb_hist(a):
     if sum(map(bool, (a.traces_dir, a.tar, a.download))) != 1:
         raise SystemExit("give one of --download, --tar (archive parts, or - for stdin) or --traces-dir")
     if a.download:
-        df = hist_download(t0, t1, a.lat, a.lon, a.radius_km, instance=a.instance)
+        from .adsb import NotPublishedYet
+
+        try:
+            df = hist_download(t0, t1, a.lat, a.lon, a.radius_km, instance=a.instance)
+        except (NotPublishedYet, ValueError) as e:
+            raise SystemExit(f"[hist] {e}") from None
     elif a.tar:
         df = hist_tar(a.tar, t0, t1, a.lat, a.lon, a.radius_km)
     else:
