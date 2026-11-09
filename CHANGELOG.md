@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.1 — 2026-11-09
+
+- Fix: historical download of a day not yet published by adsb.lol now fails at once with a clear
+  message (latest available day, use the live capture meanwhile) instead of a traceback; checked with HEAD
+  requests before downloading anything. The UI shows the error.
+
 ## 0.7.0 — 2026-11-09
 
 - Historical ADS-B mode: `dgeo adsb-hist --download` and the ADS-B tab's "Historical" source stream the

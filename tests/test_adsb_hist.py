@@ -66,6 +66,13 @@ class FakeGitHub:
             part = p.rsplit(".", 1)[-1]
             self.files[(repo, part)] = open(p, "rb").read()
 
+    def head(self, url, allow_redirects, timeout, headers):
+        repo, part = url.split("/")[4], url.rsplit(".", 1)[-1]
+
+        class R:
+            status_code = 302 if (repo, part) in self.files else 404
+        return R()
+
     def get(self, url, stream, timeout, headers):
         self.calls.append(url)
         repo = url.split("/")[4]
@@ -96,7 +103,7 @@ def test_download_streams_parts_and_falls_back_to_the_main_repo(tmp_path):
     ref = hist(str(tmp_path / "dir"), T0 + 60, T0 + 300, 40.0, -3.0, 20.0)
     assert len(df) == len(ref) > 0 and set(df.hex) == {"aaaaaa", "cccccc"}
     tag = "v2025.06.15-planes-readsb-prod-0"  # T0 = 2025-06-15 15:06:40 UTC
-    assert gh.calls[0].endswith(f"/globe_history_2025/releases/download/{tag}/{tag}.tar.aa")
+    assert gh.calls[0].endswith(f"/globe_history_2025/releases/download/{tag}/{tag}.tar.aa")  # 404
     assert gh.calls[1].endswith(f"/globe_history/releases/download/{tag}/{tag}.tar.aa")
     assert gh.calls[-1].endswith(f".tar.a{chr(97 + len(parts))}")  # stops at the first missing part
 
@@ -106,6 +113,9 @@ def test_download_missing_day(tmp_path):
 
     from dgeo.adsb import hist_download
 
+    from dgeo.adsb import NotPublishedYet
+
     gh = FakeGitHub([], repo="globe_history")
-    with pytest.raises(FileNotFoundError):
+    with pytest.raises(NotPublishedYet, match="latest available"):
         hist_download(T0, T0 + 60, 40.0, -3.0, 20.0, session=gh, log=lambda *_: None)
+    assert gh.calls == []  # checked with HEAD requests, nothing downloaded

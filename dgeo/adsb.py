@@ -377,7 +377,7 @@ class _HttpParts(io.RawIOBase):
                 self.repos = self.repos[:1]
             self.resp, self.it = r, r.iter_content(1 << 20)
             return True
-        raise FileNotFoundError(f"{self.tag} not found (not published yet? days appear ~1-2 days later)")
+        raise NotPublishedYet(f"{self.tag} is not published (yet): adsb.lol publishes each day ~1-2 days later")
 
     def readinto(self, b):
         while True:
@@ -414,6 +414,36 @@ def _utc_days(t_start: float, t_end: float) -> list[str]:
     return [(d0 + _dt.timedelta(days=k)).strftime("%Y.%m.%d") for k in range((d1 - d0).days + 1)]
 
 
+class NotPublishedYet(FileNotFoundError):
+    pass
+
+
+def history_published(day: str, instance: str = "prod-0", session=None, timeout: float = 20.0) -> bool:
+    """Whether the archive of a UTC day (``YYYY.MM.DD``) is downloadable (one HEAD request per repo)."""
+    import requests
+
+    s = session or requests
+    tag = f"v{day}-planes-readsb-{instance}"
+    for repo in (f"globe_history_{day[:4]}", "globe_history"):
+        url = HISTORY_URL.format(repo=repo, tag=tag, part="aa")
+        r = s.head(url, allow_redirects=False, timeout=timeout, headers={"User-Agent": USER_AGENT})
+        if r.status_code in (200, 301, 302, 303, 307, 308):
+            return True
+    return False
+
+
+def latest_published(instance: str = "prod-0", session=None, max_back: int = 7) -> str | None:
+    """Most recent UTC day available, looking back at most ``max_back`` days."""
+    import datetime as _dt
+
+    today = _dt.datetime.now(_dt.timezone.utc).date()
+    for k in range(max_back + 1):
+        day = (today - _dt.timedelta(days=k)).strftime("%Y.%m.%d")
+        if history_published(day, instance, session):
+            return day
+    return None
+
+
 def hist_download(t_start: float, t_end: float, lat: float, lon: float, radius_km: float,
                   instance: str = "prod-0", session=None, log=lambda m: print(m, file=sys.stderr)) -> pd.DataFrame:
     """Past ADS-B for an area and time window, from the adsb.lol daily archives (ODbL 1.0): each UTC day
@@ -427,7 +457,14 @@ def hist_download(t_start: float, t_end: float, lat: float, lon: float, radius_k
     sess = session or requests.Session()
     win = _Window(t_start, t_end, lat, lon, radius_km)
     rows = []
-    for day in _utc_days(t_start, t_end):
+    days = _utc_days(t_start, t_end)
+    missing = [d for d in days if not history_published(d, instance, sess)]
+    if missing:  # fail fast, before downloading GBs of the other day
+        last = latest_published(instance, sess)
+        raise NotPublishedYet(f"archive not published yet for {', '.join(missing)} (UTC); latest available: "
+                              f"{last or 'none in the last 7 days'}. adsb.lol publishes each day ~1-2 days later: "
+                              "try again later, or use the live capture for recent recordings.")
+    for day in days:
         raw = _HttpParts(day, instance, sess, log)
         rows += _scan_tar(io.BufferedReader(raw, buffer_size=1 << 20), win, log)
         log(f"[hist] {day}: {raw.n_bytes / 1e9:.2f} GB read, {len(rows)} positions kept so far")

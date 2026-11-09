@@ -351,6 +351,12 @@ with tabs[0]:
             procs()[hist_key].wait(timeout=10)
             st.rerun()
         st.write("Download running… (Refresh to follow)" if hrun else "")
+        hp = procs().get(hist_key)
+        if hp is not None and not hrun and hp.returncode:  # finished with an error: show it plainly
+            lines = (S / "adsb_hist.log").read_text().strip().splitlines() if (S / "adsb_hist.log").exists() else []
+            st.error(lines[-1] if lines else f"download failed (exit code {hp.returncode})")
+        elif hp is not None and not hrun and hp.returncode == 0:
+            st.success("Historical traffic downloaded into flights.csv")
         if (S / "adsb_hist.log").exists():
             with st.expander("Download log", expanded=hrun):
                 st.code((S / "adsb_hist.log").read_text()[-2000:])

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dgeo"
-version = "0.7.0"
+version = "0.7.1"
 description = "Acoustic geolocation from aircraft Doppler curves and ADS-B trajectories (proof of concept)"
 readme = "README.md"
 license = "AGPL-3.0-or-later"
